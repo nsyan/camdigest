@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 运行数据与密钥
+data/
+models/
+config/config.yaml
+.env
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
