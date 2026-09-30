@@ -1,13 +1,13 @@
 # CamDigest 技术架构
 
-> 3 机位监控录像 → 每日精华视频（5/10/30/60 分钟四档）+ 带图飞书日报
+> 4 台摄像头（5 机位，一台双摄出固定+云台两路）→ 每日精华视频（5/10/30/60 分钟四档）+ 带图飞书日报
 > 术语见 [CONTEXT.md](../CONTEXT.md)；关键决策见 [ADR 目录](./adr/)
 
 ## 1. 目标与非目标
 
 **目标**
 - 只读消费已有录像目录，不负责录制
-- 本地免费预筛承担 95%+ 过滤，API 成本压在 ¥1-3/天
+- 本地免费预筛承担 95%+ 过滤，API 成本压在 ¥2-5/天（按 5 机位、约 300 候选片段/天估）
 - 人脸识别（家人身份）驱动精华筛选与日报叙事
 - 视频+音频一起理解（识别模型为全模态）
 - 每日产物：四档精华视频（NAS 本地）+ 飞书在线文档日报 + 发布到家庭群的消息卡片
@@ -31,7 +31,7 @@ services:
   camdigest:            # 主应用：流水线 + 调度 + (M2) Web
     image: camdigest:latest
     volumes:
-      - /vol1/nvr:/media/nvr:ro        # 3 机位录像根目录（只读）
+      - /vol1/nvr:/media/nvr:ro        # 5 机位录像根目录（只读）
       - ./data:/data                    # 产物 + SQLite + 人脸库
       - ./config:/app/config
     depends_on: [insightface]
@@ -42,6 +42,8 @@ services:
     volumes:
       - ./models/insightface:/models   # buffalo_l 模型缓存
 ```
+
+录像由米家「NAS 网络存储」转存落盘（Samba，多数米家机型仅 SMB1，约每 5 分钟增量同步 SD 卡内容，1 分钟/文件）；本系统只读消费该目录，不管理转存本身。双摄设备的两路转存目录形态（分目录 or 可区分文件名）以真机为准，落地时用 ffprobe 确认音轨归属。
 
 `/data` 目录规划：
 
@@ -63,9 +65,10 @@ services:
 │ S3 人形    YOLO11n ONNX：区间内采样帧人形计数      │
 │ S4 人脸    有人的帧 → InsightFace-REST → 身份标签  │
 │ S5 音频    silencedetect 标记 → 有声段 faster-     │
-│            whisper(int8) 本地转写为文本提示        │
+│            whisper(int8) 本地转写（同设备双机位     │
+│            仅转固定路，云台路复用结果）            │
 └──────────────┬───────────────────────────────────┘
-               ↓ 候选片段 ~200/天（含标签元数据）
+               ↓ 候选片段 ~300/天·5机位（含标签元数据）
 ┌─────────────── API 层 ──────────────────────────┐
 │ S6 识别   识别模型逐段：视频+音频 → 事件 JSON      │
 │           （单角色，见 ADR-0001；失败重试2次后     │
@@ -73,8 +76,8 @@ services:
 └──────────────┬───────────────────────────────────┘
                ↓ 事件库
 ┌─────────────── 产物层 ──────────────────────────┐
-│ S7 归并   跨候选片段/跨机位合并事件（人脸ID为key）、   │
-│           异常判定、关键帧提取                     │
+│ S7 归并   时间+身份/类别归并事件（同设备双机位     │
+│           视为同源必并）、异常判定、关键帧提取      │
 │ S8 日报   报告模型：事件清单 → 五板块 Markdown     │
 │ S9 发布   飞书：建docx→传关键帧图→写blocks→推群卡片│
 │ S10 剪辑  单池选段(60min池) → FFmpeg 切片拼接     │
@@ -84,12 +87,17 @@ services:
 
 各阶段落库可断点续跑（`jobs` 表按 stage 记录状态）；阶段内串行、阶段间顺序执行，S3-S5 可按候选片段并行（进程池 2-3 并发，避免挤占 NAS 转码）。
 
-**CPU 吞吐预估（i3-1315U）**：YOLO11n ~30-80ms/帧、buffalo_l ~100ms/帧；日批约 900 帧 YOLO + 数百帧人脸 + 有声段转写（估 20-30 分钟），整夜窗口绰绰有余。转写默认全量覆盖有声段（需求"四件套全要"）；若拖尾先降并发或换 tiny 模型，极端情况才开 `whisper.selected_only`（只转写 S6 选中的候选片段）作兜底——偏离全量要求，默认关闭。
+**云台机位防误报**：云台路（`lens: ptz`）画面会因镜头转动/人形追踪整体变化，S2 对其使用独立的 scene 阈值（默认更高，可按机位覆盖），并以 S3 人形计数 >0 作为该路候选片段的入库门控。
+
+**S7 归并规则**（成文，取代“以人脸 ID 为 key”）：①同设备双机位：时间重叠即并入同一事件（同源）；②跨设备：时间相邻容差 ≤2 分钟，且命中同一身份，或双方均无有效人脸时 category 相同；③无人脸事件（animal/vehicle 等）只走规则②。异常判定按 §9 `anomaly` 规则执行。
+
+**CPU 吞吐预估（i3-1315U）**：YOLO11n ~30-80ms/帧、buffalo_l ~100ms/帧；5 机位日批约 1500 帧 YOLO + 千帧级人脸 + 有声段转写（估 30-40 分钟，双机位音频去重后），整夜窗口绰绰有余。转写默认全量覆盖有声段（需求"四件套全要"）；若拖尾先降并发或换 tiny 模型，极端情况才开 `whisper.selected_only`（只转写 S6 选中的候选片段）作兜底——偏离全量要求，默认关闭。
 
 ## 5. 数据模型（SQLite）
 
 ```sql
-cameras     (id, name, dir, pattern, timezone)
+cameras     (id, name, device, lens, dir, pattern, timezone)
+             -- device+lens 表达同源双机位；单摄 lens=single
 media_files (id, camera_id, path, start_ts, end_ts, duration)
 segments    (id, media_file_id, start_s, end_s, motion_score,
              person_count, face_labels,     -- JSON: [{identity, conf, ts}]
@@ -142,7 +150,7 @@ class ReportModel(Protocol):
 3. 按分数补齐至 60 分钟目标
 4. 仍不足则放开去重兜底
 
-单事件 ≤20s（取**家人出现最密集**窗口——人脸时间戳密度优先，scene 密度次之）；按事件真实时间排序；FFmpeg 先切 TS 片段再 concat 统一时间轴，`-c:a aac` 重编码保原声。四档 = 段池 Top-N 子集分别导出。跨机位合并版是默认产物；`highlight.per_camera: true` 时每机位额外导出一份单条精华（取该机位事件子集，追加在合并版之后，不参与档位保底）。
+单事件 ≤20s（取**家人出现最密集**窗口——人脸时间戳密度优先，scene 密度次之）；同一事件含同源机位多路片段时**只取一路**入选段池——优先人脸平均置信度高的一路（云台特写通常占优），其余路仅参与事件归并与身份标注，防止同一件事在成片里播两遍；按事件真实时间排序；FFmpeg 先切 TS 片段再 concat 统一时间轴，`-c:a aac` 重编码保原声。四档 = 段池 Top-N 子集分别导出。跨机位合并版是默认产物；`highlight.per_camera: true` 时每机位在合并版导出完成后，再各导出一份独立的单机位精华文件（取该机位片段子集，不占档位时长、不参与档位保底；双摄的两机位各计一份）。
 
 ## 8. 飞书发布器
 
@@ -162,18 +170,23 @@ tenant_access_token
 
 ```yaml
 schedule: { daily_at: "03:00", timezone: Asia/Shanghai }
-cameras:
-  - { id: gate,  name: 大门, dir: /media/nvr/gate,  pattern: "*.mp4" }
-  - { id: yard,  name: 院子, dir: /media/nvr/yard,  pattern: "*.mp4" }
-  - { id: hall,  name: 大厅, dir: /media/nvr/hall,  pattern: "*.mp4" }
+cameras:                        # 4 台设备 · 5 机位；dir 以真机转存目录为准
+  - { id: gate,      name: 大门,       device: gate,    lens: single, dir: /media/nvr/gate,      pattern: "*.mp4" }
+  - { id: yard,      name: 院子,       device: yard,    lens: single, dir: /media/nvr/yard,      pattern: "*.mp4" }
+  - { id: hall,      name: 大厅,       device: hall,    lens: single, dir: /media/nvr/hall,      pattern: "*.mp4" }
+  - { id: living,    name: 客厅·固定,   device: living,  lens: fixed,  dir: /media/nvr/living,    pattern: "*.mp4" }
+  - { id: living_pt, name: 客厅·云台,   device: living,  lens: ptz,    dir: /media/nvr/living_pt,  pattern: "*.mp4",
+      prefilter: { scene_threshold: 0.08 } }   # 云台路独立阈值，防转动误报
 models:
   recognition: { protocol: openai, base_url: https://dashscope.aliyuncs.com/compatible-mode/v1,
                  model: qwen3.8-omni-flash, api_key: ${DASHSCOPE_API_KEY} }
   report:      { protocol: openai, base_url: https://api.deepseek.com/v1,
                  model: deepseek-v4.1-flash, api_key: ${DEEPSEEK_API_KEY} }
 prefilter:
-  scene_threshold: 0.03
-  whisper: { enabled: true, model: small-int8 }
+  scene_threshold: 0.03          # 云台路可在 cameras[].prefilter 按机位覆盖
+  whisper: { enabled: true, model: small-int8, selected_only: false, dual_lens_source: fixed }
+anomaly:                          # S7 异常判定规则（M1 内置一条）
+  stranger_while_family_absent: { enabled: true, family_absent_minutes: 30 }
 faces:   { rest_url: http://insightface:18080, threshold: 0.4,
            registry_dir: /data/faces }
 highlight: { tiers: [5, 10, 30, 60], max_segment_seconds: 20,
@@ -216,3 +229,6 @@ tests/                # 每阶段单测：fixture 用短样本录像
 | 未知脸体验 | 聚类编号需人工归档，漏归档会以"未知-XX"出现在日报 | M2 做"代表照点选归档"交互 |
 | CPU 夜批窗口 | whisper 是最大变量 | 降并发或换 tiny-int8；必要时手动开 `selected_only` 兜底 |
 | 飞书图片频控 | 单文档贴图量大时注意 upload QPS | 关键帧压缩至 ≤200KB，批量间 sleep |
+| 云台路 scene 误报 | 镜头转动/人形追踪使画面整体变化，S2 持续误报 | 云台路独立阈值 + S3 人形门控；首周实测校准 |
+| 双摄双路音轨重复 | 双机位可能各带相同音轨，重复转写浪费 CPU | 真机 ffprobe 确认；`dual_lens_source: fixed` 仅转固定路 |
+| 5 机位容量重估 | 候选量/成本/CPU 原按 3 机位标定 | 首周记录 token 用量与夜批耗时，超预期则收紧预筛 |
