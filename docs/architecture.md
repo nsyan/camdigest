@@ -10,7 +10,7 @@
 - 本地免费预筛承担 95%+ 过滤，API 成本压在 ¥1-3/天
 - 人脸识别（家人身份）驱动精华筛选与日报叙事
 - 视频+音频一起理解（识别模型为全模态）
-- 每日产物：四档精华视频（NAS 本地）+ 飞书在线文档日报 + 家庭群推送
+- 每日产物：四档精华视频（NAS 本地）+ 飞书在线文档日报 + 发布到家庭群的消息卡片
 
 **非目标（明确不做）**
 - 录制、实时告警、企业微信、腾讯文档、飞书云盘视频上传、模型主备降级
@@ -59,7 +59,7 @@ services:
 ```
 ┌─────────────── 本地·全免费（CPU）───────────────┐
 │ S1 索引    扫描机位目录 → ffprobe 元数据入库      │
-│ S2 预筛    FFmpeg scene/motion 检测 → 候选区间    │
+│ S2 预筛    FFmpeg scene/motion 检测 → 候选片段    │
 │ S3 人形    YOLO11n ONNX：区间内采样帧人形计数      │
 │ S4 人脸    有人的帧 → InsightFace-REST → 身份标签  │
 │ S5 音频    silencedetect 标记 → 有声段 faster-     │
@@ -73,7 +73,7 @@ services:
 └──────────────┬───────────────────────────────────┘
                ↓ 事件库
 ┌─────────────── 产物层 ──────────────────────────┐
-│ S7 归并   跨段/跨机位合并事件（人脸ID为key）、     │
+│ S7 归并   跨候选片段/跨机位合并事件（人脸ID为key）、   │
 │           异常判定、关键帧提取                     │
 │ S8 日报   报告模型：事件清单 → 五板块 Markdown     │
 │ S9 发布   飞书：建docx→传关键帧图→写blocks→推群卡片│
@@ -82,9 +82,9 @@ services:
 └─────────────────────────────────────────────────┘
 ```
 
-各阶段落库可断点续跑（`jobs` 表按 stage 记录状态）；阶段内串行、阶段间顺序执行，S3-S5 可按片段并行（进程池 2-3 并发，避免挤占 NAS 转码）。
+各阶段落库可断点续跑（`jobs` 表按 stage 记录状态）；阶段内串行、阶段间顺序执行，S3-S5 可按候选片段并行（进程池 2-3 并发，避免挤占 NAS 转码）。
 
-**CPU 吞吐预估（i3-1315U）**：YOLO11n ~30-80ms/帧、buffalo_l ~100ms/帧；日批约 900 帧 YOLO + 数百帧人脸 + 有声段转写（估 20-30 分钟），整夜窗口绰绰有余。若转写拖尾，降级为"仅 S6 选中的片段补转写"。
+**CPU 吞吐预估（i3-1315U）**：YOLO11n ~30-80ms/帧、buffalo_l ~100ms/帧；日批约 900 帧 YOLO + 数百帧人脸 + 有声段转写（估 20-30 分钟），整夜窗口绰绰有余。转写默认全量覆盖有声段（需求"四件套全要"）；若拖尾先降并发或换 tiny 模型，极端情况才开 `whisper.selected_only`（只转写 S6 选中的候选片段）作兜底——偏离全量要求，默认关闭。
 
 ## 5. 数据模型（SQLite）
 
@@ -97,14 +97,15 @@ segments    (id, media_file_id, start_s, end_s, motion_score,
 events      (id, date, start_ts, end_ts, category, score, title,
              description, camera_ids, segment_ids, keyframe_path,
              is_anomaly, created_at)
-highlights  (id, date, tier_minutes, file_path, duration, bytes,
+highlights  (id, date, camera_id,          -- NULL=跨机位合并版
+             tier_minutes, file_path, duration, bytes,
              event_ids, created_at)
 reports     (id, date, md_path, feishu_doc_url, feishu_msg_id, created_at)
 jobs        (id, date, stage, status, error, started_at, finished_at)
 identities  (id, name, dir, unknown_cluster, enrolled_at)  -- 人脸库登记
 ```
 
-全部产物**永久保留**（用户决策），`/data` 挂大容量卷（精华约 2-4GB/天）。
+全部产物**永久保留**（产品决策），`/data` 挂大容量卷（精华约 2-4GB/天）。
 
 ## 6. 模型接入层（核心抽象）
 
@@ -121,7 +122,7 @@ class ReportModel(Protocol):
 - 每角色一个配置节点，`protocol: openai | anthropic`（识别角色仅 openai）
 - OpenAI 适配器处理百炼私有 content-part（`video_url`/`input_audio`）与标准协议的差异
 - Anthropic 适配器仅实现 Messages API 文本调用（供报告角色换 Claude）
-- 响应强制 JSON schema 解析；解析失败重试 2 次（附错误反馈），仍失败则该片段标记 `recognition_status=failed`
+- 响应强制 JSON schema 解析；解析失败重试 2 次（附错误反馈），仍失败则该候选片段标记 `recognition_status=failed`
 
 **默认配置**：
 
@@ -141,7 +142,7 @@ class ReportModel(Protocol):
 3. 按分数补齐至 60 分钟目标
 4. 仍不足则放开去重兜底
 
-单事件 ≤20s（取**家人出现最密集**窗口——人脸时间戳密度优先，scene 密度次之）；按事件真实时间排序；FFmpeg 先切 TS 片段再 concat 统一时间轴，`-c:a aac` 重编码保原声。四档 = 段池 Top-N 子集分别导出。
+单事件 ≤20s（取**家人出现最密集**窗口——人脸时间戳密度优先，scene 密度次之）；按事件真实时间排序；FFmpeg 先切 TS 片段再 concat 统一时间轴，`-c:a aac` 重编码保原声。四档 = 段池 Top-N 子集分别导出。跨机位合并版是默认产物；`highlight.per_camera: true` 时每机位额外导出一份单条精华（取该机位事件子集，追加在合并版之后，不参与档位保底）。
 
 ## 8. 飞书发布器
 
@@ -152,7 +153,7 @@ tenant_access_token
 → POST /docx/v1/documents                    # 建日报（folder_token 指定目录）
 → POST /drive/v1/medias/upload_all           # 传关键帧（parent_type=docx_image）
 → PATCH /docx/v1/documents/{id}/blocks/...   # Markdown→blocks 写入（图片块）
-→ POST  /im/v1/messages                      # interactive 卡片推家庭群
+→ POST  /im/v1/messages                      # interactive 卡片发家庭群
 ```
 
 所需权限：`docx:document`、`drive:file`、`im:message:send_as_bot`。日报五板块：①今日总览（报告模型生成）②时间线（带关键帧图）③人物出没统计 ④异常事件 ⑤精华清单（MVP 为本地文件信息 + LAN 提示，M2 起变 `http://NAS:端口` 点播链接）。
@@ -176,7 +177,8 @@ prefilter:
 faces:   { rest_url: http://insightface:18080, threshold: 0.4,
            registry_dir: /data/faces }
 highlight: { tiers: [5, 10, 30, 60], max_segment_seconds: 20,
-             min_per_hour: 1, max_per_hour: 3, event_gap_minutes: 30 }
+             min_per_hour: 1, max_per_hour: 3, event_gap_minutes: 30,
+             per_camera: false }
 publish:
   feishu: { folder_token: xxx, chat_id: xxx, app_id: ${FEISHU_APP_ID},
             app_secret: ${FEISHU_APP_SECRET} }
@@ -203,7 +205,7 @@ tests/                # 每阶段单测：fixture 用短样本录像
 | 里程碑 | 内容 | 验收 |
 |---|---|---|
 | **M1** | CLI 全链路：S1-S10 + 人脸文件夹建档 + 补跑 | 对任意历史日期一键产出四档精华 + 飞书日报 |
-| **M2** | Web UI：进度/历史浏览、精华 LAN 点播、人脸库界面化管理、日报板块⑤变可点播链接 | 家人手机浏览器直接看 |
+| **M2** | Web UI：手动触发/任选日期补跑、进度与历史浏览、精华 LAN 点播、人脸库界面化管理、日报板块⑤变可点播链接 | 家人手机浏览器直接看 |
 | **M3** | watch 增量：录像落盘即预筛索引，日批只做识别汇总 | 批次耗时段差明显缩短 |
 
 ## 12. 风险与待校准
@@ -212,5 +214,5 @@ tests/                # 每阶段单测：fixture 用短样本录像
 |---|---|---|
 | qwen3.8-omni-flash 视频计费率 | 挂牌价待接入实测（视频 token/秒未公布确认） | 首周记录每日 token 用量，超 ¥5/天则收紧预筛阈值 |
 | 未知脸体验 | 聚类编号需人工归档，漏归档会以"未知-XX"出现在日报 | M2 做"代表照点选归档"交互 |
-| CPU 夜批窗口 | whisper 是最大变量 | 有声段占比高时只转写 S6 选中片段 |
+| CPU 夜批窗口 | whisper 是最大变量 | 降并发或换 tiny-int8；必要时手动开 `selected_only` 兜底 |
 | 飞书图片频控 | 单文档贴图量大时注意 upload QPS | 关键帧压缩至 ≤200KB，批量间 sleep |

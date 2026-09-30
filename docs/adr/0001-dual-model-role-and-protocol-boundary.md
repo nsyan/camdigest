@@ -2,7 +2,7 @@
 
 流水线原本规划三层 API（廉价模型批量打分 → 旗舰模型精选 → 文本模型报告），现收敛为**恰好两个模型角色**：识别模型（全模态：候选片段的视频+音频进 → 结构化事件 JSON 出）和报告模型（纯文本：事件清单进 → 日报出）。原因：仅 3 机位、日批约 200 个候选片段，单一全模态模型逐段分析成本可控（预估 ¥1-3/天），三层结构省下的钱不足以抵消其复杂度。
 
-**协议边界**：Anthropic Messages API 没有 video/audio content block，因此识别角色**只能**走 OpenAI 兼容协议（百炼等对 `video_url`/`input_audio` 的私有扩展由适配器归一化，对内只暴露统一契约）；报告角色可配置 openai 或 anthropic 任一协议。每角色单配置、无主备降级——失败重试后任务标记失败，由人工补跑。
+**协议边界**：Anthropic Messages API 没有 video/audio content block，因此识别角色**只能**走 OpenAI 兼容协议；报告角色可配置 openai 或 anthropic 任一协议。每角色单配置、无主备降级——失败重试后任务标记失败，由人工补跑。
 
 ## Consequences
 
