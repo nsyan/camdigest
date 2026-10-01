@@ -54,8 +54,9 @@ def build_segments(media: MediaFile, times: list[float], cfg: PrefilterCfg) -> l
             n = len([a for a in anchors if start <= a < mid])
             out.append(SegmentDraft(start, mid, motion_score=n / (mid - start)))
             start = mid
-        n = len([a for a in anchors if start <= a < end])
-        out.append(SegmentDraft(start, end, motion_score=n / (end - start)))
+        if end - start >= cfg.min_segment_seconds:  # 尾块同样受 min_segment 约束
+            n = len([a for a in anchors if start <= a < end])
+            out.append(SegmentDraft(start, end, motion_score=n / (end - start)))
     return out
 
 
