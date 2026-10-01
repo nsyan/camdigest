@@ -49,10 +49,10 @@ class Segment(Base):
     media_file_id: Mapped[int] = mapped_column(ForeignKey("media_files.id"))
     start_s: Mapped[float]
     end_s: Mapped[float]
-    motion_score: Mapped[float] = 0.0
-    person_count: Mapped[int] = -1  # -1=未处理（S3 幂等标记）
+    motion_score: Mapped[float] = mapped_column(default=0.0)
+    person_count: Mapped[int] = mapped_column(default=-1)  # -1=未处理（S3 幂等标记）
     face_labels: Mapped[list | None] = mapped_column(JSON, default=list)  # [{identity,conf,ts}]
-    audio_active: Mapped[bool] = False
+    audio_active: Mapped[bool] = mapped_column(default=False)
     transcript: Mapped[str | None] = mapped_column(String)
     recognition_status: Mapped[str] = mapped_column(String, default="pending")  # pending|ok|failed
     draft: Mapped[dict | None] = mapped_column(JSON)  # S6 EventDraft 快照
