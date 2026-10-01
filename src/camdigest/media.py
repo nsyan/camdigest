@@ -8,6 +8,10 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
 
 _TS_PATTERNS = [  # 优先文件名（米家转存按时间命名），失败退回 mtime
     re.compile(r"(20\d{12})"),            # 20260929100000
@@ -41,3 +45,25 @@ def probe(path: Path) -> MediaMeta:
     duration = float(fmt["duration"])
     ts = parse_start_ts(path) or datetime.fromtimestamp(path.stat().st_mtime)  # noqa: DTZ006
     return MediaMeta(path=path, start_ts=ts, duration=duration, size_bytes=int(fmt["size"]))
+
+
+# —— Task 6 追加：抽帧统一入口，s3/s4 共用（评审：消除 cv2 抽帧重复）——
+def sample_frames(path: Path, times: list[float]) -> list[tuple[float, np.ndarray]]:
+    """按时刻抽帧（cv extra，惰性 import）。返回实际读到的 (t, frame) 列表。"""
+    import cv2
+    cap = cv2.VideoCapture(str(path))
+    out = []
+    for t in times:
+        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+        ok, frame = cap.read()
+        if ok:
+            out.append((t, frame))
+    cap.release()
+    return out
+
+
+def frame_jpg(frame) -> bytes:
+    """单帧编码 JPEG（cv extra）；编码失败返回空 bytes。"""
+    import cv2
+    ok, buf = cv2.imencode(".jpg", frame)
+    return buf.tobytes() if ok else b""
