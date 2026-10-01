@@ -67,3 +67,12 @@ def frame_jpg(frame) -> bytes:
     import cv2
     ok, buf = cv2.imencode(".jpg", frame)
     return buf.tobytes() if ok else b""
+
+
+# —— Task 7 追加：ffmpeg 单帧抽取，S6 关键帧/S4 共用 ——
+def grab_frame(path: Path, t: float, out: Path) -> Path:
+    """ffmpeg 在 t 秒处抽单帧写 out（JPEG）；成功返回 out 路径。"""
+    subprocess.run(
+        ["ffmpeg", "-y", "-ss", str(t), "-i", str(path), "-frames:v", "1", str(out)],
+        check=True, capture_output=True)
+    return out
