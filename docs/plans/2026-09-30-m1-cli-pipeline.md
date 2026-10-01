@@ -26,6 +26,16 @@
 - **CAL-1** 双摄转存目录形态：本计划假设双摄两路**分目录**（`living/` 固定路、`living_pt/` 云台路）。真机若为同目录可区分文件名，改 `cameras[].dir + pattern` 即可
 - **CAL-2** 双机位音轨：假设固定路带音轨、云台路复用（`whisper.dual_lens_source: fixed`）。真机 ffprobe 确认后改配置
 
+## 声明偏离（spec 未显式要求、本计划引入；评审要求显式化）
+
+- `prefilter.min_segment_seconds / max_segment_seconds / pad_seconds`、`ModelCfg.timeout_seconds`：实现所需的最小参数化
+- `whisper.dual_lens_source` 取值扩为 `fixed|ptz|all`（CAL-2 未定，留全枚举）
+- ptz 机位无 prefilter 覆盖时自动套 0.08（spec §4 只说"默认更高"，未给数值）
+- 混合打分规则表 stranger 50 / visitor 55 / animal 40 / vehicle 35 四值为计划补全（spec §6 只给了 family 70、empty 10）
+- S2 的 motion 以场景锚密度近似（spec §4 "scene/motion 检测"）
+- CLI `--until` 与 `schedule` 子命令（spec §10 只列 run/enroll-faces/backfill）
+- 未知脸 M1 统一标「未知」；`identities.unknown_cluster` 列预留，聚类编号（未知-XX）M2 交互归档启用（spec §12 风险表承接）
+
 ## File Structure（全图）
 
 ```
@@ -38,9 +48,9 @@ src/camdigest/
 ├── media.py            # ffprobe/ffmpeg 公共封装（probe、切片段、抽帧）
 ├── pipeline/
 │   ├── __init__.py
+│   ├── query.py        # 跨阶段共享查询（cams_by_id / *_for_date）
 │   ├── orchestrator.py # STAGES 表 + run_day + jobs 断点
-│   ├── s1_index.py … s10_clip.py
-│   └── workers.py      # S3-S5 进程池并行执行器
+│   └── s1_index.py … s10_clip.py
 ├── llm/
 │   ├── __init__.py
 │   ├── contracts.py    # SegmentHint/EventDraft/两个 Protocol
@@ -77,7 +87,7 @@ docker-compose.yml      # 对齐 architecture.md §3
 [project]
 name = "camdigest"
 version = "0.1.0"
-description = "3+2 机位家庭监控录像 → 每日精华 + 飞书日报"
+description = "4 设备 5 机位家庭监控录像 → 每日精华 + 飞书日报"
 requires-python = ">=3.12"
 dependencies = [
   "pydantic>=2.7",
@@ -482,7 +492,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, UniqueConstraint, create_engine
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
@@ -518,7 +528,7 @@ class Segment(Base):
     start_s: Mapped[float]
     end_s: Mapped[float]
     motion_score: Mapped[float] = 0.0
-    person_count: Mapped[int] = 0
+    person_count: Mapped[int] = -1  # -1=未处理（S3 幂等标记）
     face_labels: Mapped[list | None] = mapped_column(JSON, default=list)  # [{identity,conf,ts}]
     audio_active: Mapped[bool] = False
     transcript: Mapped[str | None] = mapped_column(String)
@@ -576,12 +586,7 @@ class Job(Base):
     status: Mapped[str] = mapped_column(String, default="running")  # running|done|failed
     error: Mapped[str | None] = mapped_column(String)
     started_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTimeNullable())
-
-
-def DateTimeNullable():
-    from sqlalchemy import DateTime
-    return DateTime()
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Identity(Base):
@@ -602,28 +607,20 @@ def init_db(url: str) -> None:
     _engines[url] = eng
 
 
+@contextmanager
 def session_scope(url: str):
     """用法: with session_scope(url) as s: ...  成功即 commit，异常即 rollback。"""
-    from contextlib import contextmanager
-
     if url not in _engines:
         init_db(url)
     factory = sessionmaker(bind=_engines[url], expire_on_commit=False)
-
-    @contextmanager
-    def _scope():
-        with factory.begin() as s:
-            yield s
-
-    return _scope()
+    with factory.begin() as s:
+        yield s
 
 
 def _json_dumps(obj, **kw):
     import json
     return json.dumps(obj, ensure_ascii=False, **kw)
 ```
-
-（实现时把 `DateTimeNullable()` 这个丑陋占位改成顶部直接 `from sqlalchemy import DateTime`，`finished_at: Mapped[datetime | None] = mapped_column(DateTime)`——写进文件时即用干净版本。）
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -770,7 +767,7 @@ def parse_start_ts(path: Path) -> datetime | None:
     return None
 
 
-def probe(path: Path, tz=None) -> MediaMeta:
+def probe(path: Path) -> MediaMeta:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-print_format", "json", "-show_format", str(path)],
         check=True, capture_output=True, text=True).stdout
@@ -834,12 +831,12 @@ git commit -m "feat: media封装+S1索引——ffprobe入库、时间戳解析�
 ## Task 5: S2 预筛 scene 检测
 
 **Files:**
-- Create: `src/camdigest/pipeline/s2_prefilter.py`
-- Test: `tests/test_s2.py`
+- Create: `src/camdigest/pipeline/s2_prefilter.py`、`src/camdigest/pipeline/query.py`
+- Test: `tests/test_s2.py`、`tests/test_query.py`
 
 **Interfaces:**
 - Consumes: `MediaFile`、`CameraCfg.effective_scene_threshold()`
-- Produces: `detect_scenes(path: Path, threshold: float) -> list[float]`（场景突变时刻，秒）；`build_segments(media: MediaFile, times: list[float], cfg: PrefilterCfg) -> list[SegmentDraft]`，`SegmentDraft(start_s, end_s, motion_score)`；`run_prefilter(date: str, session, settings) -> int`（新增 segments 数）
+- Produces: `detect_scenes(path: Path, threshold: float) -> list[float]`（场景突变时刻，秒）；`build_segments(media: MediaFile, times: list[float], cfg: PrefilterCfg) -> list[SegmentDraft]`，`SegmentDraft(start_s, end_s, motion_score)`；`run_prefilter(date: str, session, settings) -> int`（新增 segments 数）；`pipeline/query.py`：`cams_by_id(settings)`、`medias_for_date(date, session)`、`segments_for_date(date, session, pending_only=False)`——s2-s6 共享查询，消除各 `run_*` 里的样板重复
 
 - [ ] **Step 1: 写失败测试**
 
@@ -894,6 +891,7 @@ from sqlalchemy.orm import Session
 
 from camdigest.config import PrefilterCfg, Settings
 from camdigest.db import MediaFile, Segment
+from camdigest.pipeline.query import cams_by_id, medias_for_date
 
 _PTS_RE = re.compile(r"pts_time:([\d.]+)")
 
@@ -939,10 +937,8 @@ def build_segments(media: MediaFile, times: list[float], cfg: PrefilterCfg) -> l
 
 def run_prefilter(date: str, session: Session, settings: Settings) -> int:
     added = 0
-    cams = {c.id: c for c in settings.cameras}
-    for media in session.query(MediaFile).filter(MediaFile.path.like("%/%")):
-        if media.start_ts.strftime("%Y-%m-%d") != date:
-            continue
+    cams = cams_by_id(settings)
+    for media in medias_for_date(date, session):
         if session.query(Segment).filter(Segment.media_file_id == media.id).count():
             continue  # 幂等
         cam = cams.get(media.camera_id)
@@ -952,6 +948,38 @@ def run_prefilter(date: str, session: Session, settings: Settings) -> int:
                                 motion_score=d.motion_score))
             added += 1
     return added
+```
+
+```python
+# src/camdigest/pipeline/query.py —— 跨阶段共享查询（s2-s6 复用）
+from __future__ import annotations
+
+from sqlalchemy.orm import Session
+
+from camdigest.config import CameraCfg, Settings
+from camdigest.db import MediaFile, Segment
+
+
+def cams_by_id(settings: Settings) -> dict[str, CameraCfg]:
+    return {c.id: c for c in settings.cameras}
+
+
+def medias_for_date(date: str, session: Session) -> list[MediaFile]:
+    return [m for m in session.query(MediaFile).all()
+            if m.start_ts.strftime("%Y-%m-%d") == date]
+
+
+def segments_for_date(date: str, session: Session, *,
+                      pending_only: bool = False) -> list[tuple[Segment, MediaFile]]:
+    out = []
+    for seg, media in (session.query(Segment, MediaFile)
+                       .join(MediaFile, Segment.media_file_id == MediaFile.id).all()):
+        if media.start_ts.strftime("%Y-%m-%d") != date:
+            continue
+        if pending_only and seg.recognition_status != "pending":
+            continue
+        out.append((seg, media))
+    return out
 ```
 
 - [ ] **Step 4: 跑测试确认通过**
@@ -970,10 +998,11 @@ git commit -m "feat: S2预筛——scene检测、中点切分、云台路独立�
 
 **Files:**
 - Create: `src/camdigest/pipeline/s3_person.py`
+- Modify: `src/camdigest/media.py`（追加 `sample_frames` / `frame_jpg`，见 Step 3 末尾）
 - Test: `tests/test_s3.py`（单测 mock YOLO；真模型用例标 heavy）
 
 **Interfaces:**
-- Produces: `count_people(video_path: Path, start_s: float, end_s: float, sampler) -> PersonResult`，`PersonResult(max_count: int, frames: list[tuple[float, int]])`；`run_person(date, session, settings) -> int`；`YoloPersonSampler`（cv extra 内，惰性加载 ultralytics）
+- Produces: `count_people(video_path: Path, start_s: float, end_s: float, sampler) -> PersonResult`，`PersonResult(max_count: int, frames: list[tuple[float, int]])`；`run_person(date, session, settings) -> int`；`YoloPersonSampler`（cv extra 内，惰性加载 ultralytics）；幂等：`person_count=-1` 表未处理，处理后写实际计数，重跑不重复推断
 - 本任务同时落实**云台路门控**：`run_person` 后，`lens=ptz` 机位上 `person_count==0` 的候选片段直接删除（不进段池），对应架构 §4「云台机位防误报」
 
 - [ ] **Step 1: 写失败测试**
@@ -1025,7 +1054,8 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from camdigest.config import Settings
-from camdigest.db import MediaFile, Segment
+from camdigest.db import Segment
+from camdigest.pipeline.query import segments_for_date
 
 
 def sample_times(start_s: float, end_s: float, fps: float = 1.0) -> list[float]:
@@ -1056,16 +1086,8 @@ class YoloPersonSampler:
         self.model = YOLO(weights)
 
     def sample(self, path: Path, times: list[float]):
-        import cv2
-        cap = cv2.VideoCapture(str(path))
-        out = []
-        for t in times:
-            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
-            ok, frame = cap.read()
-            if ok:
-                out.append((t, frame))
-        cap.release()
-        return out
+        from camdigest.media import sample_frames   # 抽帧统一入口，s3/s4 共用
+        return sample_frames(path, times)
 
     def infer(self, frames) -> list[int]:
         out = []
@@ -1077,27 +1099,42 @@ class YoloPersonSampler:
 
 def run_person(date: str, session: Session, settings: Settings) -> int:
     sampler = YoloPersonSampler()
-    cams = {c.id: c for c in settings.cameras}
     updated = 0
-    for seg, media in (session.query(Segment, MediaFile)
-                       .join(MediaFile, Segment.media_file_id == MediaFile.id)
-                       .filter(Segment.person_count == 0).all()):
-        if media.start_ts.strftime("%Y-%m-%d") != date or seg.motion_score == 0 and seg.person_count == 0 and False:
+    for seg, media in segments_for_date(date, session):
+        if seg.person_count >= 0:      # -1=未处理（Task 3 默认值），重跑不重复推断
             continue
         r = count_people(Path(media.path), seg.start_s, seg.end_s,
                          sampler=sampler, infer=sampler.infer)
         seg.person_count = r.max_count
         updated += 1
-    # 云台路门控：ptz 机位 0 人片段删除（spec §4 云台防误报）
+    # 云台路门控：ptz 机位 0 人候选片段删除（spec §4 云台防误报）
     ptz_cams = {c.id for c in settings.cameras if c.lens == "ptz"}
-    for seg, media in (session.query(Segment, MediaFile)
-                       .join(MediaFile, Segment.media_file_id == MediaFile.id).all()):
+    for seg, media in segments_for_date(date, session):
         if media.camera_id in ptz_cams and seg.person_count == 0:
             session.delete(seg)
     return updated
 ```
 
-（`run_person` 中那行防御性判断写成干净版本：只按日期过滤 `person_count` 已为默认 0 的段——即"未处理"。执行者直接写 `if media.start_ts.strftime(...) != date: continue`，删除那串 `and False` 败笔。）
+```python
+# src/camdigest/media.py 追加（Task 6）——抽帧统一入口，s3/s4 共用（评审：消除 cv2 抽帧重复）
+def sample_frames(path: Path, times: list[float]) -> list[tuple[float, "np.ndarray"]]:
+    import cv2
+    cap = cv2.VideoCapture(str(path))
+    out = []
+    for t in times:
+        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+        ok, frame = cap.read()
+        if ok:
+            out.append((t, frame))
+    cap.release()
+    return out
+
+
+def frame_jpg(frame) -> bytes:
+    import cv2
+    ok, buf = cv2.imencode(".jpg", frame)
+    return buf.tobytes() if ok else b""
+```
 
 - [ ] **Step 4: 跑测试确认通过 + heavy 用例**
 
@@ -1127,7 +1164,7 @@ git commit -m "feat: S3人形——1fps采样YOLO计数、云台路0人门控"
 - Test: `tests/test_s4.py`（httpx MockTransport mock REST；enroll 用随机向量）
 
 **Interfaces:**
-- Produces: `FaceClient(base_url)`：`extract(image_bytes) -> list[FaceDet(bbox, det_score, norm: list[float])]`；`load_registry(data_dir) -> dict[str, list[vec]]`（`/faces/{身份名}/*.jpg` → 向量，REST 批量 embed）；`label_faces(dets, registry, threshold) -> list[dict]`（`{identity, conf, ts}`，未命中为 `未知-NN` 聚类暂用 `未知`）；`run_face(date, session, settings) -> int`；CLI 建档命令 `enroll_faces(data_dir, rest_url)`
+- Produces: `FaceClient(base_url)`：`extract(image_bytes) -> list[FaceDet(bbox, det_score, norm: list[float])]`；`load_registry(data_dir) -> dict[str, list[vec]]`（`/faces/{身份名}/*.jpg` → 向量，REST 批量 embed）；`label_faces(dets, registry, threshold) -> list[dict]`（`{identity, conf, ts}`，未命中为 `未知-NN` 聚类暂用 `未知`）；`run_face(date, session, settings) -> int`；CLI 建档命令 `enroll_faces(data_dir, rest_url, session=None) -> int`（返回建档照片数，同步 identities 行）
 - 关键帧抽取复用 Task 4 的 ffmpeg 单帧命令（在 `media.py::grab_frame(path, t, out)`，本任务补上并测试）
 
 - [ ] **Step 1: 写失败测试**
@@ -1182,7 +1219,8 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from camdigest.config import Settings
-from camdigest.db import MediaFile, Segment
+from camdigest.db import Identity, MediaFile, Segment
+from camdigest.pipeline.query import segments_for_date
 
 
 @dataclass
@@ -1210,7 +1248,7 @@ def load_registry(data_dir: Path, client: FaceClient) -> dict[str, list[np.ndarr
     npz = data_dir / "registry.npz"
     if npz.exists():
         z = np.load(npz)
-        return {k: [z[k]] for k in z.files}
+        return {k: list(z[k]) for k in z.files}
     registry: dict[str, list[np.ndarray]] = {}
     for id_dir in sorted(data_dir.iterdir()):
         if not id_dir.is_dir():
@@ -1238,55 +1276,49 @@ def label_faces(dets: list[FaceDet], registry: dict[str, list[np.ndarray]],
 
 
 def run_face(date: str, session: Session, settings: Settings) -> int:
-    """对 person_count>0 的候选片段，在人脸密度最高的 3 个采样帧抽帧打标。"""
-    import cv2
+    """对 person_count>0 的候选片段，3 个采样帧抽帧打标（抽帧统一走 media.sample_frames）。"""
+    from camdigest.media import frame_jpg, sample_frames
     client = FaceClient(settings.faces.rest_url)
     registry = load_registry(settings.storage.data_dir / "faces", client)
-    cams = {c.id: c for c in settings.cameras}
     updated = 0
-    for seg, media in (session.query(Segment, MediaFile)
-                       .join(MediaFile, Segment.media_file_id == MediaFile.id)
-                       .filter(Segment.person_count > 0).all()):
-        if media.start_ts.strftime("%Y-%m-%d") != date or seg.face_labels:
+    for seg, media in segments_for_date(date, session):
+        if seg.person_count <= 0 or seg.face_labels:
             continue
-        cap = cv2.VideoCapture(media.path)
         times = [seg.start_s + (seg.end_s - seg.start_s) * k / 4 for k in range(1, 4)]
         labels = []
-        for t in times:
-            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
-            ok, frame = cap.read()
-            if not ok:
-                continue
-            ok2, buf = cv2.imencode(".jpg", frame)
-            dets = client.extract(buf.tobytes()) if ok2 else []
+        for t, frame in sample_frames(Path(media.path), times):
+            dets = client.extract(frame_jpg(frame))
             labels += label_faces(dets, registry, settings.faces.threshold, ts=round(t, 3))
-        cap.release()
         seg.face_labels = labels
         updated += 1
     return updated
 
 
 def enroll_faces(data_dir: Path, rest_url: str, session=None) -> int:
-    """CLI enroll-faces：扫 /faces/{身份名}/*.jpg → registry.npz + identities 行。"""
+    """CLI enroll-faces：扫 /faces/{身份名}/*.jpg → embed → registry.npz + identities 行。
+
+    npz 键即身份名（多张照片 stack 成 (n,512) 矩阵），load_registry 读回时直接还原。
+    """
     client = FaceClient(rest_url)
-    registry = load_registry(data_dir, client)
-    for name in registry:
+    registry: dict[str, list[np.ndarray]] = {}
+    for id_dir in sorted(p for p in data_dir.iterdir() if p.is_dir()):
+        vecs = []
+        for img in sorted(id_dir.glob("*.jpg")):
+            dets = client.extract(img.read_bytes())
+            if dets:
+                vecs.append(np.asarray(dets[0].norm, dtype=np.float32))
+        if vecs:
+            registry[id_dir.name] = vecs
         if session is not None:  # 同步登记 identities 表（spec §5）
-            session.merge(Identity(name=name, dir=str(data_dir / name)))
-    # …npz 落盘同前
-    client = FaceClient(rest_url)
-    registry = load_registry(data_dir, client)
-    arrs, names = [], []
-    for name, vecs in registry.items():
-        for v in vecs:
-            arrs.append(v); names.append(name)
-    if not arrs:
+            session.merge(Identity(name=id_dir.name, dir=str(id_dir)))
+    if not registry:
         return 0
-    np.savez(data_dir / "registry.npz", **{f"{n}_{i}": v for i, (n, v) in enumerate(zip(names, arrs))})
-    return len(arrs)
+    np.savez(data_dir / "registry.npz",
+             **{name: np.stack(vecs) for name, vecs in registry.items()})
+    return sum(len(v) for v in registry.values())
 ```
 
-注意：`load_registry` 的 npz 键含身份名，执行时保证 `label_faces` 读回的结构是 `{身份: [vec,...]}`（把 `f"{n}_{i}"` 还原成按前缀分组；或直接存一个 JSON 索引 + npz 两个文件，取实现更直白者，但接口签名不变）。
+注意：未知脸 M1 统一标「未知」（不编 XX 号）；`identities.unknown_cluster` 列预留，聚类编号（未知-XX）M2 交互归档时启用（spec §12 风险表承接）。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -1308,7 +1340,7 @@ git commit -m "feat: S4人脸——REST抽特征、registry余弦匹配、未知
 
 **Interfaces:**
 - Produces: `audio_active_regions(path) -> list[tuple[float, float]]`；`Transcriber`（cv extra 惰性）`transcribe(path, start_s, end_s) -> str`；`run_audio(date, session, settings) -> int`
-- **CAL-2 落点**：`run_audio` 按 `device` 分组，`dual_lens_source != "all"` 时只转写该 lens 的 media，另一路 segment 按**时间重叠**复制 transcript；`selected_only=true` 时 S5 只做 `audio_active` 标记不转写（转写延后人工触发，架构 §4 兜底路径）
+- **CAL-2 落点**：`run_audio` 按 `device` 分组，`dual_lens_source != "all"` 时只转写该 lens 的 media，另一路 segment 按**时间重叠**复制 transcript；`selected_only=true` 时编排器把 S5 挪到 S6 之后执行，只转写 `draft.score ≥ 60` 的候选片段（spec §4 兜底路径原义）
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1355,6 +1387,7 @@ from sqlalchemy.orm import Session
 
 from camdigest.config import Settings
 from camdigest.db import MediaFile, Segment
+from camdigest.pipeline.query import cams_by_id, medias_for_date, segments_for_date
 
 _SIL_RE = re.compile(r"silence_start: ([\d.]+)")
 _SIL_END_RE = re.compile(r"silence_end: ([\d.]+)")
@@ -1365,7 +1398,6 @@ def audio_active_regions(path: Path, noise: float = -35.0) -> list[tuple[float, 
         ["ffmpeg", "-hide_banner", "-i", str(path), "-af",
          f"silencedetect=noise={noise}dB:d=0.5", "-f", "null", "-"],
         check=True, capture_output=True, text=True).stderr
-    dur = float(re.search(r"Duration: (\d+):(\d+):([\d.]+)", out).group(0).replace("Duration:", "").strip().split(":")[0])  # 简化：直接再 probe
     from camdigest.media import probe
     total = probe(path).duration
     starts = [float(t) for t in _SIL_RE.findall(out)]
@@ -1406,22 +1438,19 @@ def pick_transcribe_sources(medias: list[MediaFile], cams_by_id: dict, source: s
 
 
 def run_audio(date: str, session: Session, settings: Settings) -> int:
-    medias = [m for m in session.query(MediaFile).all()
-              if m.start_ts.strftime("%Y-%m-%d") == date]
-    cams = {c.id: c for c in settings.cameras}
+    medias = medias_for_date(date, session)
+    cams = cams_by_id(settings)
     wcfg = settings.prefilter.whisper
     sources = pick_transcribe_sources(medias, cams, wcfg.dual_lens_source)
     src_by_id = {m.id: m for m in medias if m.id in sources}
     tr = Transcriber(wcfg.model) if wcfg.enabled else None
     updated = 0
-    for seg, media in (session.query(Segment, MediaFile)
-                       .join(MediaFile, Segment.media_file_id == MediaFile.id).all()):
-        if media.start_ts.strftime("%Y-%m-%d") != date:
-            continue
+    for seg, media in segments_for_date(date, session):
         if media.id in sources:
             regions = audio_active_regions(Path(media.path))
             seg.audio_active = any(s < seg.end_s and e > seg.start_s for s, e in regions)
-            if tr and seg.audio_active:
+            selected = (seg.draft or {}).get("score", 0) >= 60  # selected_only 语义（S6 后执行时 draft 已落）
+            if tr and seg.audio_active and (not wcfg.selected_only or selected):
                 seg.transcript = tr.transcribe(Path(media.path), seg.start_s, seg.end_s) or seg.transcript
         else:
             # 双机位另一路：按时间重叠复用同设备源路结果
@@ -1437,7 +1466,7 @@ def run_audio(date: str, session: Session, settings: Settings) -> int:
     return updated
 ```
 
-（`audio_active_regions` 里那行坏掉的 Duration 解析删掉，直接用 `probe(path).duration`——执行者清理。）
+（`run_audio` 的 donor 复制分支保持不变；`selected_only=true` 时 S5 需在 S6 后执行，由编排器调序，见 Task 18。）
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -1527,6 +1556,8 @@ class SegmentHint:
 
 
 class EventDraft(BaseModel):
+    """S6 对单个候选片段的识别结果（spec §4 称"事件 JSON"；语义上是候选片段级草稿，
+    归并后才成为 CONTEXT 意义上的事件）。"""
     category: Literal["family", "stranger", "visitor", "animal", "vehicle", "empty"]
     people: list[str] = []
     score: int = 0
@@ -1551,7 +1582,7 @@ class RecognitionModel(Protocol):
 
 @runtime_checkable
 class ReportModel(Protocol):
-    def write(self, date: str, events: list[dict]) -> str: ...
+    def write(self, date: str, payload: dict) -> str: ...
 ```
 
 - [ ] **Step 4: 跑测试确认通过** → `pytest tests/test_contracts.py -v`，3 passed
@@ -1571,8 +1602,8 @@ git commit -m "feat: LLM契约——SegmentHint/EventDraft/双角色Protocol"
 
 **Interfaces:**
 - Consumes: `ModelCfg`、Task 9 契约
-- Produces: `OpenAIRecognition(cfg: ModelCfg).analyze(video_path, hint) -> EventDraft`；`OpenAIReport(cfg: ModelCfg).write(date, events) -> str`；`media.cut_clip / extract_audio`
-- 行为：视频 base64 进 `video_url`（data URI）、抽音频 16k mono wav 进 `input_audio`（DashScope 百炼兼容格式）；JSON 解析失败**重试 2 次**，每次把校验错误附回 messages；仍失败抛 `RecognitionError`
+- Produces: `OpenAIRecognition(cfg: ModelCfg).analyze(video_path, hint) -> EventDraft`；`OpenAIReport(cfg: ModelCfg).write(date, payload) -> str`；`media.cut_clip / extract_audio`
+- 行为：视频 base64 进 `video_url`（data URI）、抽音频 16k mono wav 进 `input_audio`（DashScope 百炼兼容格式）；JSON 解析失败**重试 2 次**（每次把校验错误附回 messages），5xx/429 指数退避重试、4xx 即抛（spec §4「失败重试 2 次」覆盖 HTTP 层）；仍失败抛 `RecognitionError`；每次调用后 `last_usage` 记录 token 用量（spec §12 校准承接）
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1637,6 +1668,20 @@ def test_analyze_gives_up_after_2_retries(video_file):
     with pytest.raises(RecognitionError):
         _client(handler).analyze(__import__("pathlib").Path(video_file),
                                  SegmentHint(camera="x", lens="single"))
+
+
+def test_analyze_retries_on_429(video_file):
+    n = {"n": 0}
+
+    def handler(request):
+        n["n"] += 1
+        if n["n"] == 1:
+            return httpx.Response(429, json={"error": "rate"})
+        return httpx.Response(200, json=GOOD)
+
+    draft = _client(handler).analyze(__import__("pathlib").Path(video_file),
+                                     SegmentHint(camera="x", lens="single"))
+    assert n["n"] == 2 and draft.score == 85
 ```
 
 （`RecognitionError` 放 `contracts.py`：`class RecognitionError(Exception)`——执行时补进 Task 9 文件并加一行 import 测试。）
@@ -1650,6 +1695,7 @@ def test_analyze_gives_up_after_2_retries(video_file):
 from __future__ import annotations
 
 import base64
+import time
 from pathlib import Path
 
 import httpx
@@ -1683,20 +1729,28 @@ class OpenAIRecognition:
         ]
         messages = [{"role": "system", "content": SYSTEM},
                     {"role": "user", "content": content}]
-        last_err = "unknown"
-        for _ in range(3):  # 首次 + 2 次重试（附错误反馈）
-            r = self._http.post(f"{self.cfg.base_url}/chat/completions",
-                                headers={"Authorization": f"Bearer {self.cfg.api_key}"},
-                                json={"model": self.cfg.model, "messages": messages,
-                                      "response_format": {"type": "json_object"}})
-            r.raise_for_status()
-            text = r.json()["choices"][0]["message"]["content"]
+        last_err, text = "unknown", ""
+        self.last_usage = {}
+        for attempt in range(3):  # 首次 + 2 次重试；JSON 失败附反馈，5xx/429 退避（spec §4）
             try:
+                r = self._http.post(f"{self.cfg.base_url}/chat/completions",
+                                    headers={"Authorization": f"Bearer {self.cfg.api_key}"},
+                                    json={"model": self.cfg.model, "messages": messages,
+                                          "response_format": {"type": "json_object"}})
+                r.raise_for_status()
+                body = r.json()
+                self.last_usage = body.get("usage", {})
+                text = body["choices"][0]["message"]["content"]
                 return EventDraft.from_json(text)
+            except httpx.HTTPStatusError as e:
+                last_err = f"HTTP {e.response.status_code}"
+                if e.response.status_code < 500 and e.response.status_code != 429:
+                    raise  # 4xx（鉴权/参数错）重试无意义
+                time.sleep(2 ** attempt)
             except Exception as e:  # 解析/校验失败 → 带反馈重试
                 last_err = str(e)
-                messages.append({"role": "assistant", "content": text})
-                messages.append({"role": "user", "content": f"输出不是合法 EventDraft JSON：{last_err}，请只输出修正后的 JSON"})
+                messages += [{"role": "assistant", "content": text},
+                             {"role": "user", "content": f"输出不是合法 EventDraft JSON：{last_err}，请只输出修正后的 JSON"}]
         raise RecognitionError(last_err)
 
     @staticmethod
@@ -1713,23 +1767,24 @@ class OpenAIReport:
         self.cfg = cfg
         self._http = httpx.Client(timeout=cfg.timeout_seconds)
 
-    def write(self, date: str, events: list[dict]) -> str:
+    def write(self, date: str, payload: dict) -> str:
         import json as _json
         r = self._http.post(f"{self.cfg.base_url}/chat/completions",
                             headers={"Authorization": f"Bearer {self.cfg.api_key}"},
                             json={"model": self.cfg.model, "messages": [
                                 {"role": "system", "content": REPORT_SYSTEM},
-                                {"role": "user", "content": f"日期：{date}\n事件清单：\n"
-                                 + _json.dumps(events, ensure_ascii=False, indent=1)}]})
+                                {"role": "user", "content": f"日期：{date}\n"
+                                 + _json.dumps(payload, ensure_ascii=False, indent=1)}]})
         r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"
+        return r.json()["choices"][0]["message"]["content"]
 
 
 REPORT_SYSTEM = (
-    "你是家庭日报撰稿人。根据事件清单写 Markdown 日报，固定五板块，标题用二级标题："
-    "## 今日总览、## 时间线、## 人物出没、## 异常事件、## 精华清单。"
+    "你是家庭日报撰稿人。根据输入 JSON（events=事件清单、highlight_paths=四档精华文件路径）写 Markdown 日报，"
+    "固定五板块，标题用二级标题：## 今日总览、## 时间线、## 人物出没、## 异常事件、## 精华清单。"
     "时间线按时间排序，每条含时刻、标题、一句话描述；有 keyframe 的事件在该条目后单独一行输出占位符 {{img:<event_id>}}。"
-    "人物出没按人统计出现时段。语言温暖简洁，面向家庭成员。"
+    "人物出没按人统计出现时段。精华清单逐条列出 highlight_paths 的文件（标注'本地 NAS 文件，局域网内可访问'），不要编造。"
+    "语言温暖简洁，面向家庭成员。"
 )
 ```
 
@@ -1769,7 +1824,7 @@ git commit -m "feat: OpenAI适配器——video_url/input_audio组装、JSON重�
 - Test: `tests/test_anthropic_adapter.py`
 
 **Interfaces:**
-- Produces: `AnthropicReport(cfg).write(date, events) -> str`（Messages API，`x-api-key` + `anthropic-version: 2023-06-01`，复用 Task 10 的 `REPORT_SYSTEM`）
+- Produces: `AnthropicReport(cfg).write(date, payload) -> str`（Messages API，`x-api-key` + `anthropic-version: 2023-06-01`，复用 Task 10 的 `REPORT_SYSTEM`）
 
 - [ ] **Step 1: 写失败测试**（MockTransport 校验 header、body 结构与返回取值，模式同 Task 10）
 - [ ] **Step 2: 确认失败**
@@ -1793,15 +1848,15 @@ class AnthropicReport:
         self.cfg = cfg
         self._http = httpx.Client(timeout=cfg.timeout_seconds)
 
-    def write(self, date: str, events: list[dict]) -> str:
+    def write(self, date: str, payload: dict) -> str:
         r = self._http.post(f"{self.cfg.base_url}/v1/messages",
                             headers={"x-api-key": self.cfg.api_key,
                                      "anthropic-version": "2023-06-01"},
                             json={"model": self.cfg.model, "max_tokens": 4096,
                                   "system": REPORT_SYSTEM,
                                   "messages": [{"role": "user", "content":
-                                      f"日期：{date}\n事件清单：\n"
-                                      + json.dumps(events, ensure_ascii=False, indent=1)}]})
+                                      f"日期：{date}\n"
+                                      + json.dumps(payload, ensure_ascii=False, indent=1)}]})
         r.raise_for_status()
         return "".join(b["text"] for b in r.json()["content"] if b.get("type") == "text")
 ```
@@ -1817,7 +1872,7 @@ class AnthropicReport:
 
 **Interfaces:**
 - Consumes: `OpenAIRecognition`、`media.cut_clip`
-- Produces: `hybrid_score(category: str, model_score: int) -> int`；`build_recognition(settings) -> RecognitionModel`（工厂，按 protocol 选适配器）；`run_recognition(date, session, settings) -> int`
+- Produces: `hybrid_score(category: str, model_score: int) -> int`；`run_recognition(date, session, settings) -> int`（识别角色固定 OpenAIRecognition，ADR-0001 下无选择分支；token 用量汇总落 `/data/usage/{date}.json`，承接 spec §12 校准）
 - 规则（spec §6）：`family 70 / stranger 50 / visitor 55 / animal 40 / vehicle 35 / empty 10`；模型分 ≥ 规则分+20 才采信模型分
 
 - [ ] **Step 1: 写失败测试**
@@ -1830,8 +1885,8 @@ from camdigest.pipeline.s6_recognize import hybrid_score
 
 
 @pytest.mark.parametrize("category,model,expect", [
-    ("family", 85, 85),      # 85 >= 70+20 → 采信
-    ("family", 80, 70),      # 80 < 90     → 规则兜底
+    ("family", 95, 95),      # 95 >= 70+20=90 → 采信
+    ("family", 89, 70),      # 89 < 90        → 规则兜底
     ("empty", 90, 90),
     ("empty", 5, 10),
     ("stranger", 40, 50),
@@ -1848,15 +1903,20 @@ def test_hybrid_score(category, model, expect):
 """S6 识别：候选片段逐段送识别模型 → EventDraft 落 segments.draft（spec §6）。"""
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from camdigest.config import Settings
-from camdigest.db import MediaFile, Segment
-from camdigest.llm.contracts import FaceHint, RecognitionModel, SegmentHint
+from camdigest.db import Segment
+from camdigest.llm.contracts import FaceHint, SegmentHint
+from camdigest.llm.openai_adapter import OpenAIRecognition
 from camdigest.media import cut_clip
+from camdigest.pipeline.query import cams_by_id, segments_for_date
 
+# family 70 / empty 10 来自 spec §6；stranger/visitor/animal/vehicle 为计划补全值（见「声明偏离」）
 RULE_SCORE = {"family": 70, "stranger": 50, "visitor": 55,
               "animal": 40, "vehicle": 35, "empty": 10}
 
@@ -1866,26 +1926,18 @@ def hybrid_score(category: str, model_score: int) -> int:
     return model_score if model_score >= rule + 20 else rule
 
 
-def build_recognition(settings: Settings) -> RecognitionModel:
-    from camdigest.llm.openai_adapter import OpenAIRecognition
-    return OpenAIRecognition(settings.models.recognition)
-
-
 def run_recognition(date: str, session: Session, settings: Settings) -> int:
-    model = build_recognition(settings)
-    cams = {c.id: c for c in settings.cameras}
+    model = OpenAIRecognition(settings.models.recognition)
+    cams = cams_by_id(settings)
     done = 0
-    for seg, media in (session.query(Segment, MediaFile)
-                       .join(MediaFile, Segment.media_file_id == MediaFile.id)
-                       .filter(Segment.recognition_status == "pending").all()):
-        if media.start_ts.strftime("%Y-%m-%d") != date:
-            continue
+    for seg, media in segments_for_date(date, session, pending_only=True):
         cam = cams[media.camera_id]
         hint = SegmentHint(camera=cam.name, lens=cam.lens,
                            face_labels=[FaceHint(**f) for f in (seg.face_labels or [])],
                            transcript=seg.transcript)
-        clip = cut_clip(Path(media.path), seg.start_s, seg.end_s,
-                        Path(media.path).with_suffix(f".seg{seg.id}.mp4"))
+        tmp = settings.storage.data_dir / "tmp" / f"seg{seg.id}"   # 临时文件只进 /data/tmp，
+        tmp.mkdir(parents=True, exist_ok=True)                     # 绝不写只读源目录（spec §3 :ro）
+        clip = cut_clip(Path(media.path), seg.start_s, seg.end_s, tmp / "clip.mp4")
         try:
             draft = model.analyze(clip, hint)
             seg.draft = {"category": draft.category, "people": draft.people,
@@ -1896,10 +1948,12 @@ def run_recognition(date: str, session: Session, settings: Settings) -> int:
             seg.recognition_status = "failed"
             seg.draft = {"error": str(e)[:500]}
         finally:
-            clip.unlink(missing_ok=True)
-            clip.with_suffix(".hint.wav").unlink(missing_ok=True)
-            Path(media.path).with_suffix(".hint.wav").unlink(missing_ok=True)
+            shutil.rmtree(tmp, ignore_errors=True)
         done += 1
+    usage = settings.storage.data_dir / "usage" / f"{date}.json"   # spec §12 token 校准
+    usage.parent.mkdir(parents=True, exist_ok=True)
+    usage.write_text(json.dumps({"segments": done, "usage": getattr(model, "last_usage", {})},
+                                ensure_ascii=False), encoding="utf-8")
     return done
 ```
 
@@ -2084,11 +2138,11 @@ def detect_anomaly(evs, cfg: AnomalyCfg, family_names: set[str]) -> None:
 
 **Interfaces:**
 - Consumes: `events` 行 + `reports` 表
-- Produces: `build_report_model(settings) -> ReportModel`（openai/anthropic 按 `models.report.protocol`）；`events_payload(events) -> list[dict]`（事件 → 喂模型的 JSON：id/时刻/标题/描述/category/人物/是否异常/有无关键帧）；`run_report(date, session, settings) -> Path`（写 `/data/reports/{date}.md` + `reports` 行）
+- Produces: `build_report_model(settings) -> ReportModel`（openai/anthropic 按 `models.report.protocol`）；`build_payload(events, settings) -> dict`：`{"events": [id/时刻/标题/描述/category/人物/是否异常/有无关键帧], "highlight_paths": [四档路径]}`——路径确定性（`/data/highlights/{date}/精华_{tier}min.mp4`），S10 未跑即可预知，板块⑤ MVP 数据源（spec §8）；`run_report(date, session, settings) -> Path`（写 `/data/reports/{date}.md` + `reports` 行）
 
-- [ ] **Step 1: 写失败测试**：`events_payload` 字段齐全且时间为 `HH:MM`；`run_report` 用假 `ReportModel`（monkeypatch `build_report_model`）产出 md 文件与 reports 行
+- [ ] **Step 1: 写失败测试**：`build_payload` 的 events 字段齐全且时间为 `HH:MM`、highlight_paths 含四档确定性路径；`run_report` 用假 `ReportModel`（monkeypatch `build_report_model`）产出 md 文件与 reports 行
 - [ ] **Step 2: 确认失败**
-- [ ] **Step 3: 实现**（`events_payload` 把 Event 行转 dict，时刻 `start_ts.strftime("%H:%M")`；`run_report` 调 `model.write(date, payload)`，落盘 `reports/{date}.md`，`session.merge(Report(date=..., md_path=...))`）
+- [ ] **Step 3: 实现**（`build_payload` 把 Event 行转 dict，时刻 `start_ts.strftime("%H:%M")`，highlight_paths 按 settings.highlight.tiers 生成确定性路径；`run_report` 调 `model.write(date, payload)`，落盘 `reports/{date}.md`，`session.merge(Report(date=..., md_path=...))`）
 - [ ] **Step 4: 确认通过**
 - [ ] **Step 5: Commit** `git commit -m "feat: S8日报——事件清单→五板块Markdown"`
 
@@ -2132,11 +2186,11 @@ def test_md_to_blocks_structure():
 
 **Interfaces:**
 - Produces:
-  - `@dataclass SelEvent`（`event_id, camera_id, device, lens, media_path, start_s, end_s, score, start_ts, face_ts: list[float], scene_density: float`——由 `from_rows(events, segments)` 构造，**同事件多路段先选一路**：`best_of_event()` 取人脸平均置信度高的一路，平局取固定路）
-  - `densest_window(face_ts, seg_start, seg_end, max_seconds) -> tuple[float, float]`（≤max_seconds 内人脸时间戳最多窗口，无脸取居中）
+  - `@dataclass SelEvent`（`event_id, camera_id, device, lens, media_path, start_s, end_s, score, start_ts, face_ts: list[float], scene_ts: list[float]`——由 `from_rows(events, segments)` 构造，**同事件多路候选片段先选一路**：`best_of_event()` 取人脸平均置信度高的一路，平局取固定路；`SelEvent` 与 Task 13 `SegLite` 字段束相近是有意的读写两侧视图，M1 不强行合并）
+  - `densest_window(face_ts, scene_ts, seg_start, seg_end, max_seconds) -> tuple[float, float]`（≤max_seconds 内人脸时间戳最多窗口，**并列时 scene 突变密度高者胜**——spec §7 次级判据；均无取居中）
   - `select_pool(events: list[SelEvent], cfg: HighlightCfg) -> list[ClipPlan]`（四步：每小时保底 1 → 每小时补到 `max_per_hour`（与已选间隔 <`event_gap_minutes` 跳过）→ 按分补到 60min → 放开去重兜底；输出按真实时间排序）
-  - `@dataclass ClipPlan(event_id, media_path, start_s, end_s, score, camera_id, tier_rank)`
-  - `tier_subset(pool, minutes, cfg) -> list[ClipPlan]`（**池内**按 score 降序取到时长满 `minutes`，再按 start_ts 排序输出——保证短档 ⊆ 长档，ADR-0002）
+  - `@dataclass ClipPlan(event_id, media_path, start_ts, start_s, end_s, score, camera_id)`（start_ts 供档位内时间排序）
+  - `tier_subset(pool, minutes) -> list[ClipPlan]`（**池内**按 score 降序取到时长满 `minutes`，再按 start_ts 排序输出——保证短档 ⊆ 长档，ADR-0002）
 
 - [ ] **Step 1: 写失败测试**（覆盖：每小时保底含夜间 0-6 点、30 分钟间隔去重、不足 60min 放开兜底、5min 档 ⊆ 60min 档、densest_window 边界）
 - [ ] **Step 2: 确认失败**
@@ -2145,27 +2199,33 @@ def test_md_to_blocks_structure():
 ```python
 # src/camdigest/pipeline/s10_selection.py 核心
 
-def densest_window(face_ts, seg_start, seg_end, max_seconds):
-    """≤max_seconds 内人脸时间戳最多的窗口；无脸取居中窗口。"""
+def densest_window(face_ts, scene_ts, seg_start, seg_end, max_seconds):
+    """≤max_seconds 内人脸时间戳最多的窗口；并列时 scene 突变数多者胜；均无取居中。"""
     span = min(max_seconds, seg_end - seg_start)
-    if not face_ts:
-        mid = (seg_start + seg_end) / 2
+    mid = (seg_start + seg_end) / 2
+    if not face_ts and not scene_ts:
         return (max(seg_start, mid - span / 2), min(seg_end, mid + span / 2))
-    ts = sorted(t for t in face_ts if seg_start <= t <= seg_end)
-    best, best_n = (seg_start, seg_start + span), 0
-    for i, t in enumerate(ts):
-        j = i
-        while j + 1 < len(ts) and ts[j + 1] - t <= span:
-            j += 1
-        n = j - i + 1
-        if n > best_n:
-            best_n = n
-            best = (t, min(seg_end, t + max(span, 1.0)))
+    faces = sorted(t for t in face_ts if seg_start <= t <= seg_end)
+    scenes = sorted(t for t in scene_ts if seg_start <= t <= seg_end)
+
+    def _count(ts, s, e):
+        import bisect
+        return bisect.bisect_right(ts, e) - bisect.bisect_left(ts, s)
+
+    anchors = sorted(set(faces) | {seg_start})
+    best, best_key = (seg_start, seg_start + span), (-1, -1)
+    for t in anchors:
+        e = min(seg_end, t + span)
+        key = (_count(faces, t, e), _count(scenes, t, e))     # 人脸优先，scene 次之
+        if key > best_key:
+            best_key = key
+            best = (t, max(e, t + 1.0))
     return best
 
 
-def _total(plans):
-    return sum(p.end_s - p.start_s for p in plans)
+def _clipped(e: SelEvent, cfg: HighlightCfg) -> float:
+    s, t = densest_window(e.face_ts, e.scene_ts, e.start_s, e.end_s, cfg.max_segment_seconds)
+    return t - s
 
 
 def select_pool(events: list[SelEvent], cfg: HighlightCfg) -> list[ClipPlan]:
@@ -2188,25 +2248,25 @@ def select_pool(events: list[SelEvent], cfg: HighlightCfg) -> list[ClipPlan]:
             if e not in selected and gap_ok(e):
                 selected.append(e)
     for e in sorted(events, key=lambda e: e.score, reverse=True):   # 3. 按分补齐
-        if _total_plans(selected, cfg) >= target:
+        if sum(_clipped(x, cfg) for x in selected) >= target:
             break
         if e not in selected and gap_ok(e):
             selected.append(e)
     for e in sorted(events, key=lambda e: e.score, reverse=True):   # 4. 放开去重
-        if _total_plans(selected, cfg) >= target:
+        if sum(_clipped(x, cfg) for x in selected) >= target:
             break
         if e not in selected:
             selected.append(e)
     plans = []
     for e in sorted(selected, key=lambda e: e.start_ts):
-        s, t = densest_window(e.face_ts, e.start_s, e.end_s, cfg.max_segment_seconds)
+        s, t = densest_window(e.face_ts, e.scene_ts, e.start_s, e.end_s, cfg.max_segment_seconds)
         plans.append(ClipPlan(event_id=e.event_id, media_path=e.media_path,
-                              start_s=s, end_s=t, score=e.score,
-                              camera_id=e.camera_id, tier_rank=0))
+                              start_ts=e.start_ts, start_s=s, end_s=t,
+                              score=e.score, camera_id=e.camera_id))
     return plans
 
 
-def tier_subset(pool: list[ClipPlan], minutes: int, cfg) -> list[ClipPlan]:
+def tier_subset(pool: list[ClipPlan], minutes: int) -> list[ClipPlan]:
     """段池内按 score 降序取到时长满 minutes，输出按时间排序（ADR-0002 子集承诺）。"""
     target = minutes * 60
     chosen, total = [], 0.0
@@ -2218,7 +2278,7 @@ def tier_subset(pool: list[ClipPlan], minutes: int, cfg) -> list[ClipPlan]:
     return sorted(chosen, key=lambda p: p.start_ts)
 ```
 
-（`_total_plans(selected, cfg)` = 对已选事件逐个 `densest_window` 后时长求和；为免重复计算可缓存，M1 直接算即可。）`SelEvent.from_rows` 同事件多路段先 `best_of_event()` 择优（人脸平均置信度高者胜，平局取 fixed 路）。
+`SelEvent.from_rows` 同事件多路候选片段先 `best_of_event()` 择优（人脸平均置信度高者胜，平局取 fixed 路）；`scene_ts` 取该候选片段内 S2 的场景突变时刻（从 Segment.motion 锚点回放）。
 - [ ] **Step 4: 确认通过** → 至少 6 个用例
 - [ ] **Step 5: Commit** `git commit -m "feat: S10选段——单池四步、同源择优、档位Top-N"`
 
@@ -2247,16 +2307,15 @@ def tier_subset(pool: list[ClipPlan], minutes: int, cfg) -> list[ClipPlan]:
 
 **Files:**
 - Create: `src/camdigest/pipeline/orchestrator.py`
-- Modify: `src/camdigest/config.py`（`Settings` 加 `workers: int = 1`）
 - Test: `tests/test_orchestrator.py`
 
 **Interfaces:**
 - Produces: `STAGES: list[tuple[str, Callable]]`（10 项，函数签名统一 `(date, session, settings) -> int`）；`run_day(date, settings, until: str | None = None) -> dict[str, int]`
-- 行为：每阶段查/建 `jobs(date, stage)`：`done` 跳过，否则跑完置 `done`（异常置 `failed` 并 re-raise）；S2 前 seed `Camera` 行（复用 s1 的 merge）；`until` 支持跑到指定阶段（`--until s6` 调试用）
+- 行为：每阶段查/建 `jobs(date, stage)`：`done` 跳过，否则跑完置 `done`（异常置 `failed` 并 re-raise）；S2 前 seed `Camera` 行（复用 s1 的 merge）；`until` 支持跑到指定阶段（`--until s6` 调试用）；`whisper.selected_only=true` 时 STAGES 顺序把 s5_audio 移到 s6_recognize 之后（spec §4 兜底路径，见 Task 8）
 
 - [ ] **Step 1: 写失败测试**：monkeypatch 各 stage 函数（记录调用序），断言：顺序执行、done 跳过（第二次 run_day 只跑未完成阶段）、failed 阶段中断
 - [ ] **Step 2: 确认失败**
-- [ ] **Step 3: 实现**（约 50 行；M1 默认串行——`workers>1` 的进程池分片留 TODO 注释指向 M3 watch 优化，不在 M1 实现）
+- [ ] **Step 3: 实现**（约 50 行；M1 阶段间串行执行——spec §4 的 S3-S5 并行为「可」选项，留待 M3 watch 优化；本计划不引入 workers 配置）
 - [ ] **Step 4: 确认通过**
 - [ ] **Step 5: Commit** `git commit -m "feat: 编排器——jobs断点续跑、阶段顺序执行"`
 
@@ -2343,5 +2402,5 @@ CMD ["schedule", "--config", "/app/config/config.yaml"]
 ## 执行注意
 
 - **禁止跳步**：每个任务的测试先行；接口签名以本计划 Interfaces 块为准，改动需同步更新计划
-- 计划中标注「执行者清理/以官方文档核对」的段落（db 的 DateTimeNullable、s2 的坏行、飞书 block_type 数值）是**已知待清理项**，实现时直接写干净版本，不要照抄
+- 计划中标注「以官方文档核对」的段落（飞书 block_type 数值）执行时核对修正；评审发现的坏代码（db 占位、s3 `and False`、s5 Duration 解析、OpenAIReport 截断行）已在计划中修净，勿再引入
 - CAL-1/CAL-2 真机确认后只改 `config.yaml`，代码与计划不动
