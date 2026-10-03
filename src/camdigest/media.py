@@ -76,3 +76,15 @@ def grab_frame(path: Path, t: float, out: Path) -> Path:
         ["ffmpeg", "-y", "-ss", str(t), "-i", str(path), "-frames:v", "1", str(out)],
         check=True, capture_output=True)
     return out
+
+
+def extract_audio(path: Path, out_wav: Path) -> Path:
+    subprocess.run(["ffmpeg", "-y", "-i", str(path), "-vn", "-ac", "1", "-ar", "16000",
+                    "-c:a", "pcm_s16le", str(out_wav)], check=True, capture_output=True)
+    return out_wav
+
+
+def cut_clip(path: Path, start_s: float, end_s: float, out: Path) -> Path:
+    subprocess.run(["ffmpeg", "-y", "-ss", f"{start_s:.3f}", "-to", f"{end_s:.3f}",
+                    "-i", str(path), "-c", "copy", str(out)], check=True, capture_output=True)
+    return out
