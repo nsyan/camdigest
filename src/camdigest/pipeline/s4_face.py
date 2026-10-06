@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import base64
 import logging
-
-log = logging.getLogger(__name__)
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +17,8 @@ from sqlalchemy.orm import Session
 from camdigest.config import Settings
 from camdigest.db import Identity
 from camdigest.pipeline.query import segments_for_date
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
