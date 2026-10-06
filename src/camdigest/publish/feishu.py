@@ -7,6 +7,7 @@ POST /open-apis/im/v1/messages?receive_id_type=chat_id。
 """
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import tempfile
@@ -136,7 +137,8 @@ class FeishuClient:
         r = self._http.post(
             f"{FEISHU_OPEN_BASE}/open-apis/im/v1/messages?receive_id_type=chat_id",
             headers=self._auth(),
-            json={"receive_id": self.cfg.chat_id, "msg_type": "interactive", "content": str(card).replace("'", '"')})
+            json={"receive_id": self.cfg.chat_id, "msg_type": "interactive",
+                  "content": json.dumps(card, ensure_ascii=False)})
         r.raise_for_status()
         return r.json()["data"]["message_id"]
 
