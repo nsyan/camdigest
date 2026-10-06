@@ -88,3 +88,12 @@ def cut_clip(path: Path, start_s: float, end_s: float, out: Path) -> Path:
     subprocess.run(["ffmpeg", "-y", "-ss", f"{start_s:.3f}", "-to", f"{end_s:.3f}",
                     "-i", str(path), "-c", "copy", str(out)], check=True, capture_output=True)
     return out
+
+
+def has_audio_stream(path: Path) -> bool:
+    """ffprobe 探测音轨（s5 静默检测、s10 concat 前置共用）。"""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+         "stream=index", "-of", "csv=p=0", str(path)],
+        check=True, capture_output=True, text=True).stdout
+    return bool(out.strip())

@@ -13,25 +13,15 @@ from sqlalchemy.orm import Session
 
 from camdigest.config import Settings
 from camdigest.db import MediaFile, Segment
-from camdigest.media import probe
+from camdigest.media import has_audio_stream, probe
 from camdigest.pipeline.query import cams_by_id, medias_for_date, segments_for_date
 
 _SIL_RE = re.compile(r"silence_start: ([\d.]+)")
 _SIL_END_RE = re.compile(r"silence_end: ([\d.]+)")
 
 
-def _has_audio_stream(path: Path) -> bool:
-    """ffprobe 探测音轨。无音轨的视频 silencedetect 无任何输出，
-    若不提前返回 []，尾块逻辑会误判全程有声（spec 测试定义无音轨 → 无有声段）。"""
-    out = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
-         "stream=index", "-of", "csv=p=0", str(path)],
-        check=True, capture_output=True, text=True).stdout
-    return bool(out.strip())
-
-
 def audio_active_regions(path: Path, noise: float = -35.0) -> list[tuple[float, float]]:
-    if not _has_audio_stream(path):  # 无音轨 → 无任何有声段
+    if not has_audio_stream(path):  # 无音轨 → 无任何有声段
         return []
     out = subprocess.run(
         ["ffmpeg", "-hide_banner", "-i", str(path), "-af",

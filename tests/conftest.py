@@ -9,7 +9,8 @@ def make_video(path, seconds=6, with_audio=True) -> str:
            "-i", f"testsrc=duration={seconds}:size=320x240:rate=10"]
     if with_audio:
         cmd += ["-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}"]
-    cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"]
+    cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-g", "10"]  # 1s GOP@10fps：整数秒切点有关键帧，S10 切片对齐
     if with_audio:
         cmd += ["-c:a", "aac", "-shortest"]
     cmd.append(str(path))
