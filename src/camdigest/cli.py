@@ -13,10 +13,6 @@ from camdigest.config import Settings
 DEFAULT_CONFIG = "config/config.yaml"
 
 
-def _config_path(args) -> Path:
-    return Path(args.config)
-
-
 def _load_settings(path: Path) -> Settings:
     return Settings.load(path)
 
@@ -77,16 +73,28 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "enroll-faces":
         data_dir = Path(args.data_dir) if args.data_dir else settings.faces.registry_dir
-        n = _enroll_for_cli(data_dir, settings.faces.rest_url)
+        from camdigest.db import init_db, session_scope
+        url = f"sqlite:///{Path(settings.storage.data_dir) / 'camdigest.db'}"
+        init_db(url)
+        with session_scope(url) as s:   # spec §5：同步 identities 行
+            n = _enroll_for_cli(data_dir, settings.faces.rest_url, session=s)
         print(f"enrolled {n} face photos")
         return 0
     if args.command == "backfill":
+        from camdigest.db import Report, init_db, session_scope
         d = date.fromisoformat(args.from_date)
         end = date.fromisoformat(args.to_date)
+        url = f"sqlite:///{Path(settings.storage.data_dir) / 'camdigest.db'}"
+        init_db(url)
         while d <= end:
             day = d.isoformat()
-            _run_day_for_cli(day, settings)
-            print(f"backfilled {day}")
+            with session_scope(url) as s:
+                has_report = s.query(Report).filter(Report.date == day).one_or_none()
+            if has_report and not args.force:
+                print(f"skipped {day} (report exists; --force to rerun)")
+            else:
+                _run_day_for_cli(day, settings)
+                print(f"backfilled {day}")
             d += timedelta(days=1)
         return 0
     if args.command == "schedule":

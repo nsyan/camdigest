@@ -159,19 +159,27 @@ def test_run_day_resume_after_failure(tmp_path, video_file, monkeypatch):
     _install_fakes(monkeypatch, settings)
     from camdigest.pipeline import s4_face
 
-    def boom(self, image_bytes):
-        raise RuntimeError("sidecar down")
+    # 注入点选 FaceClient 构造（run_face 逐帧容错只吞单帧异常——最终评审阻断项修复后的预期行为）
+    class DownSidecar:
+        def __init__(self, *a, **kw):
+            raise RuntimeError("sidecar down")
 
-    monkeypatch.setattr(s4_face.FaceClient, "extract", boom)
+    monkeypatch.setattr(s4_face, "FaceClient", DownSidecar)
     with pytest.raises(RuntimeError, match="sidecar down"):
         run_day("2026-09-29", settings)
 
-    # 修复：恢复假 extract（与 _install_fakes 同款）后重跑
+    # 修复：恢复假 client（与 _install_fakes 同款）后重跑
     vec = np.zeros(512, dtype=np.float32)
     vec[0] = 1.0
-    monkeypatch.setattr(s4_face.FaceClient, "extract",
-                        lambda self, b: [FaceDet(bbox=[0, 0, 1, 1], det_score=0.9,
-                                                 norm=vec.tolist())])
+
+    class RecoveredClient:
+        def __init__(self, base_url="http://fake", timeout=30.0):
+            pass
+
+        def extract(self, image_bytes):
+            return [FaceDet(bbox=[0, 0, 1, 1], det_score=0.9, norm=vec.tolist())]
+
+    monkeypatch.setattr(s4_face, "FaceClient", RecoveredClient)
     results = run_day("2026-09-29", settings)
     url = f"sqlite:///{settings.storage.data_dir}/camdigest.db"
     with db.session_scope(url) as s:

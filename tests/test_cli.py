@@ -60,27 +60,53 @@ def test_unknown_subcommand_exit_2():
     assert e.value.code == 2
 
 
-def test_backfill_iterates_days(monkeypatch):
+def test_backfill_iterates_days(monkeypatch, tmp_path):
     days = []
 
     def fake_run_day(date, settings, until=None):
         days.append(date)
         return {}
 
+    s = _settings()
+    s.storage.data_dir = tmp_path
     monkeypatch.setattr(cli, "_run_day_for_cli", fake_run_day)
-    monkeypatch.setattr(cli, "_load_settings", lambda path: object())
+    monkeypatch.setattr(cli, "_load_settings", lambda path: s)
     rc = cli.main(["backfill", "--from", "2026-09-01", "--to", "2026-09-03"])
     assert rc == 0 and days == ["2026-09-01", "2026-09-02", "2026-09-03"]
 
 
-def test_enroll_faces_dispatches(monkeypatch):
+def test_backfill_force_reruns_reported_days(monkeypatch, tmp_path):
+    from camdigest import db
+
+    days = []
+    monkeypatch.setattr(cli, "_run_day_for_cli",
+                        lambda date, settings, until=None: days.append(date) or {})
+    s = _settings()
+    s.storage.data_dir = tmp_path
+    monkeypatch.setattr(cli, "_load_settings", lambda path: s)
+    url = f"sqlite:///{tmp_path}/camdigest.db"   # CLI 读 data_dir/camdigest.db
+    db.init_db(url)
+    with db.session_scope(url) as sess:
+        sess.merge(db.Report(date="2026-09-02", md_path="/x.md"))
+    cli.main(["backfill", "--from", "2026-09-01", "--to", "2026-09-03"])
+    assert days == ["2026-09-01", "2026-09-03"]          # 有日报的 09-02 跳过
+    days.clear()
+    cli.main(["backfill", "--from", "2026-09-02", "--to", "2026-09-02", "--force"])
+    assert days == ["2026-09-02"]                        # --force 重跑
+
+
+def test_enroll_faces_dispatches(monkeypatch, tmp_path):
     seen = {}
 
     def fake_enroll(data_dir, rest_url, session=None):
         seen["dir"] = str(data_dir)
+        seen["session"] = session
         return 3
 
     monkeypatch.setattr(cli, "_enroll_for_cli", fake_enroll)
-    monkeypatch.setattr(cli, "_load_settings", lambda path: _settings())
+    s = _settings()
+    s.storage.data_dir = tmp_path
+    monkeypatch.setattr(cli, "_load_settings", lambda path: s)
     rc = cli.main(["enroll-faces"])
     assert rc == 0 and "faces" in seen["dir"]
+    assert seen["session"] is not None   # spec §5：identities 行同步需要 session

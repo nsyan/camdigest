@@ -6,6 +6,9 @@ registry 自管：/data/faces/{身份名}/*.jpg 建档时批量 embed 存 .npz�
 from __future__ import annotations
 
 import base64
+import logging
+
+log = logging.getLogger(__name__)
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -76,8 +79,13 @@ def label_faces(dets: list[FaceDet], registry: dict[str, list[np.ndarray]],
 
 
 def run_face(date: str, session: Session, settings: Settings) -> int:
-    """对 person_count>0 的候选片段，3 个采样帧抽帧打标（抽帧统一走 media.sample_frames）。"""
-    from camdigest.media import frame_jpg, sample_frames  # cv extra 惰性
+    """对 person_count>0 的候选片段，3 个采样帧抽帧打标。
+
+    抽帧走 media.grab_frame（ffmpeg 单帧，无 cv2 依赖——保持 [dev] 基线可跑 E2E）。
+    """
+    import tempfile
+
+    from camdigest.media import grab_frame
     client = FaceClient(settings.faces.rest_url)
     registry = load_registry(settings.faces.registry_dir, client)
     updated = 0
@@ -86,9 +94,18 @@ def run_face(date: str, session: Session, settings: Settings) -> int:
             continue
         times = [seg.start_s + (seg.end_s - seg.start_s) * k / 4 for k in range(1, 4)]
         labels = []
-        for t, frame in sample_frames(Path(media.path), times):
-            dets = client.extract(frame_jpg(frame))
-            labels += label_faces(dets, registry, settings.faces.threshold, ts=round(t, 3))
+        with tempfile.TemporaryDirectory() as td:
+            for k, t in enumerate(times):
+                jpg = Path(td) / f"frame{k}.jpg"
+                try:
+                    grab_frame(Path(media.path), t, jpg)
+                    dets = client.extract(jpg.read_bytes())
+                except Exception as e:  # noqa: BLE001 —— 单帧失败跳过（媒体可能损坏）
+                    log.warning("S4 frame extract failed seg=%s t=%.2f: %s",
+                                    seg.id, t, e)
+                    continue
+                labels += label_faces(dets, registry, settings.faces.threshold,
+                                      ts=round(t, 3))
         seg.face_labels = labels
         updated += 1
     return updated

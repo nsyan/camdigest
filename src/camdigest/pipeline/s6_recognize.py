@@ -28,6 +28,7 @@ def run_recognition(date: str, session: Session, settings: Settings) -> int:
     model = OpenAIRecognition(settings.models.recognition)
     cams = cams_by_id(settings)
     done = 0
+    totals: dict = {}   # spec §12：全日 token 用量汇总（适配器 last_usage 为单次值）
     for seg, media in segments_for_date(date, session, pending_only=True):
         cam = cams[media.camera_id]
         hint = SegmentHint(camera=cam.name, lens=cam.lens,
@@ -38,6 +39,9 @@ def run_recognition(date: str, session: Session, settings: Settings) -> int:
         clip = cut_clip(Path(media.path), seg.start_s, seg.end_s, tmp / "clip.mp4")
         try:
             draft = model.analyze(clip, hint)
+            for k, v in getattr(model, "last_usage", {}).items():
+                if isinstance(v, (int, float)):
+                    totals[k] = totals.get(k, 0) + v
             seg.draft = {"category": draft.category, "people": draft.people,
                          "score": hybrid_score(draft.category, draft.score),
                          "title": draft.title, "description": draft.description}
@@ -50,6 +54,6 @@ def run_recognition(date: str, session: Session, settings: Settings) -> int:
         done += 1
     usage = settings.storage.data_dir / "usage" / f"{date}.json"   # spec §12 token 校准
     usage.parent.mkdir(parents=True, exist_ok=True)
-    usage.write_text(json.dumps({"segments": done, "usage": getattr(model, "last_usage", {})},
+    usage.write_text(json.dumps({"segments": done, "usage": totals},
                                 ensure_ascii=False), encoding="utf-8")
     return done

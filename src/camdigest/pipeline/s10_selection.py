@@ -102,7 +102,7 @@ def densest_window(face_ts, scene_ts, seg_start, seg_end, max_seconds):
         key = (_count(faces, t, e), _count(scenes, t, e))     # 人脸优先，scene 次之
         if key > best_key:
             best_key = key
-            best = (t, max(e, t + 1.0))
+            best = (t, min(seg_end, max(e, t + 1.0)))  # 钳制不越过段尾
     return best
 
 

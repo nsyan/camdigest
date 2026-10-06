@@ -2,6 +2,7 @@
 """APScheduler 日批入口：daily_at 跑前一天（spec §4，默认 03:00）。"""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -9,6 +10,8 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from camdigest.config import Settings
+
+log = logging.getLogger(__name__)
 
 
 def _job_date(now: datetime) -> str:
@@ -30,8 +33,8 @@ def run_scheduler(settings: Settings) -> None:
         now = datetime.now(tz=ZoneInfo(settings.schedule.timezone))
         run_day(_job_date(now), settings)
 
-    sched.add_job(job, trigger)
+    sched.add_job(job, trigger, misfire_grace_time=6 * 3600)  # NAS 休眠醒来后仍补跑
     nxt = sched.get_jobs()
-    print(f"camdigest scheduler started; next run at "
-          f"{nxt[0].next_run_time if nxt else '(unknown)'}")
+    log.info("camdigest scheduler started; next run at %s",
+             nxt[0].next_run_time if nxt else "(unknown)")
     sched.start()

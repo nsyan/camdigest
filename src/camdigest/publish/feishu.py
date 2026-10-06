@@ -118,12 +118,18 @@ class FeishuClient:
         return r.json()["data"]["file_token"]
 
     def append_blocks(self, doc_id: str, blocks: list[dict]) -> int:
+        """分批写入（飞书 children API 单请求 ≤50 块）。"""
         payload = [{k: v for k, v in b.items() if not k.startswith("_")} for b in blocks]
-        r = self._http.post(
-            f"{FEISHU_OPEN_BASE}/open-apis/docx/v1/documents/{doc_id}/blocks/"
-            f"{doc_id}/children", headers=self._auth(), json={"children": payload, "index": -1})
-        r.raise_for_status()
-        return len(payload)
+        total = 0
+        for i in range(0, len(payload), 50):
+            chunk = payload[i:i + 50]
+            r = self._http.post(
+                f"{FEISHU_OPEN_BASE}/open-apis/docx/v1/documents/{doc_id}/blocks/"
+                f"{doc_id}/children", headers=self._auth(),
+                json={"children": chunk, "index": -1})
+            r.raise_for_status()
+            total += len(chunk)
+        return total
 
     def send_card(self, title: str, url: str) -> str:
         card = {"config": {"wide_screen_mode": True},
