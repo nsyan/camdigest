@@ -17,3 +17,7 @@ config/config.yaml
 .idea/
 .vscode/
 .DS_Store
+
+# Docker
+docker/Dockerfile 已跟踪；构建产物忽略
+*.ts

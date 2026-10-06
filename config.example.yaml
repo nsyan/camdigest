@@ -1,0 +1,29 @@
+# CamDigest 配置样例——复制为 config/config.yaml 后按真机校准
+# CAL-1 双摄转存目录形态：假设分目录（living/ 固定路、living_pt/ 云台路）；真机同目录可区分文件名时改 dir+pattern
+# CAL-2 双机位音轨：假设固定路带音轨、云台路复用（whisper.dual_lens_source: fixed）；真机 ffprobe 确认后改配置
+schedule: { daily_at: "03:00", timezone: Asia/Shanghai }
+cameras:                        # 4 台设备 · 5 机位；dir 以真机转存目录为准
+  - { id: gate,      name: 大门,      device: gate,   lens: single, dir: /media/nvr/gate,      pattern: "*.mp4" }
+  - { id: yard,      name: 院子,      device: yard,   lens: single, dir: /media/nvr/yard,      pattern: "*.mp4" }
+  - { id: hall,      name: 大厅,      device: hall,   lens: single, dir: /media/nvr/hall,      pattern: "*.mp4" }
+  - { id: living,    name: 客厅·固定, device: living, lens: fixed,  dir: /media/nvr/living,    pattern: "*.mp4" }
+  - { id: living_pt, name: 客厅·云台, device: living, lens: ptz,    dir: /media/nvr/living_pt, pattern: "*.mp4" }
+models:
+  recognition: { protocol: openai, base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                 model: qwen3.8-omni-flash, api_key: "${DASHSCOPE_API_KEY}" }
+  report:      { protocol: openai, base_url: "https://api.deepseek.com/v1",
+                 model: deepseek-v4.1-flash, api_key: "${DEEPSEEK_API_KEY}" }
+prefilter:
+  scene_threshold: 0.03          # 云台路可在 cameras[].prefilter 按机位覆盖
+  whisper: { enabled: true, model: small-int8, selected_only: false, dual_lens_source: "fixed" }
+anomaly:
+  stranger_while_family_absent: { enabled: true, family_absent_minutes: 30 }
+faces:
+  { rest_url: "http://insightface:18080", threshold: 0.4, registry_dir: /data/faces }
+highlight: { tiers: [5, 10, 30, 60], max_segment_seconds: 20,
+             min_per_hour: 1, max_per_hour: 3, event_gap_minutes: 30,
+             per_camera: false }
+publish:
+  feishu: { app_id: "${FEISHU_APP_ID}", app_secret: "${FEISHU_APP_SECRET}",
+            folder_token: "xxx", chat_id: "xxx", image_max_bytes: 204800 }
+storage: { data_dir: /data, retention: permanent }

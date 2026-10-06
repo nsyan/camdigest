@@ -1,0 +1,18 @@
+# 对齐 docs/architecture.md §3：主应用 + insightface sidecar 双容器
+services:
+  camdigest:
+    image: camdigest:latest
+    build: .
+    volumes:
+      - /vol1/nvr:/media/nvr:ro        # 5 机位录像根目录（只读）
+      - ./data:/data                    # 产物 + SQLite + 人脸库
+      - ./config:/app/config
+    depends_on: [insightface]
+    restart: unless-stopped
+
+  insightface:
+    image: sthphoenix/insightface-rest
+    environment: [USE_ONNX=1]          # CPU 模式，无 TensorRT
+    volumes:
+      - ./models/insightface:/models   # buffalo_l 模型缓存
+    restart: unless-stopped
