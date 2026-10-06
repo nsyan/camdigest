@@ -81,7 +81,7 @@ docker-compose.yml      # 对齐 architecture.md §3
 **Interfaces:**
 - Produces: 可安装包 `camdigest`；`tests/conftest.py::video_file`（Task 4 完整实现，本任务先占位返回 None）
 
-- [ ] **Step 1: 写 pyproject.toml**
+- [x] **Step 1: 写 pyproject.toml**
 
 ```toml
 [project]
@@ -121,7 +121,7 @@ line-length = 100
 src = ["src", "tests"]
 ```
 
-- [ ] **Step 2: 建包目录与空文件**
+- [x] **Step 2: 建包目录与空文件**
 
 ```bash
 mkdir -p src/camdigest/pipeline src/camdigest/llm src/camdigest/publish tests
@@ -129,7 +129,7 @@ touch src/camdigest/__init__.py src/camdigest/pipeline/__init__.py \
       src/camdigest/llm/__init__.py src/camdigest/publish/__init__.py tests/__init__.py
 ```
 
-- [ ] **Step 3: 写冒烟测试**
+- [x] **Step 3: 写冒烟测试**
 
 ```python
 # tests/test_smoke.py
@@ -137,12 +137,12 @@ def test_import():
     import camdigest  # noqa: F401
 ```
 
-- [ ] **Step 4: 安装并验证**
+- [x] **Step 4: 安装并验证**
 
 Run: `pip install -e ".[dev]" && pytest -v`
 Expected: `test_import` PASS（not heavy 默认收集）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pyproject.toml src tests
@@ -159,7 +159,7 @@ git commit -m "chore: 项目脚手架——src布局、依赖分档、pytest基�
 - Produces: `Settings`、`CameraCfg`、`Settings.load(path: Path) -> Settings`；后续所有任务从 `settings.cameras / settings.prefilter / settings.anomaly / settings.highlight / settings.models` 取值
 - 字段名与 `docs/architecture.md §9` 逐一对应
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_config.py
@@ -240,12 +240,12 @@ def test_broken_pair_rejected(tmp_path):
         Settings.load(p)
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `pytest tests/test_config.py -v`
 Expected: FAIL `ModuleNotFoundError: camdigest.config`
 
-- [ ] **Step 3: 实现 config.py**
+- [x] **Step 3: 实现 config.py**
 
 ```python
 # src/camdigest/config.py
@@ -414,12 +414,12 @@ class Settings(BaseModel):
         return cls.model_validate(_deep_expand(raw))
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `pytest tests/test_config.py -v`
 Expected: 4 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/camdigest/config.py tests/test_config.py
@@ -435,7 +435,7 @@ git commit -m "feat: 配置层——yaml+env展开、双摄机位校验、云台
 **Interfaces:**
 - Produces: ORM 模型 `Camera/MediaFile/Segment/Event/Highlight/Report/Job/Identity`；`init_db(url: str) -> None`；`session_scope(url)` 上下文管理器。列名与 spec §5 一致，另有 `segments.draft`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_db.py
@@ -477,12 +477,12 @@ def test_tables_and_roundtrip(tmp_path):
             s.commit()
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `pytest tests/test_db.py -v`
 Expected: FAIL `ModuleNotFoundError`
 
-- [ ] **Step 3: 实现 db.py**
+- [x] **Step 3: 实现 db.py**
 
 ```python
 # src/camdigest/db.py
@@ -622,12 +622,12 @@ def _json_dumps(obj, **kw):
     return json.dumps(obj, ensure_ascii=False, **kw)
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `pytest tests/test_db.py -v`
 Expected: 1 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/camdigest/db.py tests/test_db.py
@@ -645,7 +645,7 @@ git commit -m "feat: 数据层——10张表ORM、jobs唯一约束、draft列"
 - Produces: `probe(path) -> MediaMeta(path,start_ts,duration,size_bytes)`；`parse_start_ts(name) -> datetime|None`；`index_camera(camera: CameraCfg, session) -> int`（返回新增文件数，幂等）
 - `conftest.video_file(tmp_path_factory)`：ffmpeg 生成 6 秒带音轨测试视频（后续所有阶段测试复用）
 
-- [ ] **Step 1: conftest 写视频 fixture（真实 ffmpeg，不用 mock）**
+- [x] **Step 1: conftest 写视频 fixture（真实 ffmpeg，不用 mock）**
 
 ```python
 # tests/conftest.py
@@ -679,7 +679,7 @@ def silent_video_file(tmp_path_factory):
     return make_video(p, with_audio=False)
 ```
 
-- [ ] **Step 2: 写失败测试**
+- [x] **Step 2: 写失败测试**
 
 ```python
 # tests/test_media.py
@@ -725,12 +725,12 @@ def test_index_idempotent(tmp_path, video_file):
 
 注意：内存库多连接会各开新库，Task 实现时把测试改为文件库 `tmp_path/t.db`（写计划时已知，执行者照做，勿用 `:memory:`）。
 
-- [ ] **Step 3: 跑测试确认失败**
+- [x] **Step 3: 跑测试确认失败**
 
 Run: `pytest tests/test_media.py tests/test_s1.py -v`
 Expected: FAIL `ModuleNotFoundError: camdigest.media`
 
-- [ ] **Step 4: 实现 media.py 与 s1_index.py**
+- [x] **Step 4: 实现 media.py 与 s1_index.py**
 
 ```python
 # src/camdigest/media.py
@@ -812,12 +812,12 @@ def index_camera(camera: CameraCfg, session: Session) -> int:
 
 （实现时测试用文件库：`url = f"sqlite:///{tmp_path}/t.db"`，两处 session_scope 用同一 url。）
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `pytest tests/test_media.py tests/test_s1.py -v`
 Expected: 3 passed
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/camdigest/media.py src/camdigest/pipeline/s1_index.py tests/conftest.py tests/test_media.py tests/test_s1.py
@@ -838,7 +838,7 @@ git commit -m "feat: media封装+S1索引——ffprobe入库、时间戳解析�
 - Consumes: `MediaFile`、`CameraCfg.effective_scene_threshold()`
 - Produces: `detect_scenes(path: Path, threshold: float) -> list[float]`（场景突变时刻，秒）；`build_segments(media: MediaFile, times: list[float], cfg: PrefilterCfg) -> list[SegmentDraft]`，`SegmentDraft(start_s, end_s, motion_score)`；`run_prefilter(date: str, session, settings) -> int`（新增 segments 数）；`pipeline/query.py`：`cams_by_id(settings)`、`medias_for_date(date, session)`、`segments_for_date(date, session, pending_only=False)`——s2-s6 共享查询，消除各 `run_*` 里的样板重复
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_s2.py
@@ -866,12 +866,12 @@ def test_build_segments_merges_and_pads():
         assert s.motion_score > 0
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `pytest tests/test_s2.py -v`
 Expected: FAIL `ModuleNotFoundError`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```python
 # src/camdigest/pipeline/s2_prefilter.py
@@ -982,12 +982,12 @@ def segments_for_date(date: str, session: Session, *,
     return out
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `pytest tests/test_s2.py -v`
 Expected: 2 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/camdigest/pipeline/s2_prefilter.py tests/test_s2.py
@@ -1005,7 +1005,7 @@ git commit -m "feat: S2预筛——scene检测、中点切分、云台路独立�
 - Produces: `count_people(video_path: Path, start_s: float, end_s: float, sampler) -> PersonResult`，`PersonResult(max_count: int, frames: list[tuple[float, int]])`；`run_person(date, session, settings) -> int`；`YoloPersonSampler`（cv extra 内，惰性加载 ultralytics）；幂等：`person_count=-1` 表未处理，处理后写实际计数，重跑不重复推断
 - 本任务同时落实**云台路门控**：`run_person` 后，`lens=ptz` 机位上 `person_count==0` 的候选片段直接删除（不进段池），对应架构 §4「云台机位防误报」
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_s3.py
@@ -1033,12 +1033,12 @@ def test_sampler_times():
     assert sample_times(0, 10) == [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `pytest tests/test_s3.py -v`
 Expected: FAIL `ModuleNotFoundError`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```python
 # src/camdigest/pipeline/s3_person.py
@@ -1136,7 +1136,7 @@ def frame_jpg(frame) -> bytes:
     return buf.tobytes() if ok else b""
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + heavy 用例**
+- [x] **Step 4: 跑测试确认通过 + heavy 用例**
 
 ```python
 # tests/test_s3.py 追加
@@ -1150,7 +1150,7 @@ def test_real_yolo_counts_testsrc(video_file):
 Run: `pytest tests/test_s3.py -v && pytest tests/test_s3.py -v -m heavy`（后者本机跑通即可）
 Expected: 非 heavy 2 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/camdigest/pipeline/s3_person.py tests/test_s3.py
@@ -1167,7 +1167,7 @@ git commit -m "feat: S3人形——1fps采样YOLO计数、云台路0人门控"
 - Produces: `FaceClient(base_url)`：`extract(image_bytes) -> list[FaceDet(bbox, det_score, norm: list[float])]`；`load_registry(data_dir) -> dict[str, list[vec]]`（`/faces/{身份名}/*.jpg` → 向量，REST 批量 embed）；`label_faces(dets, registry, threshold) -> list[dict]`（`{identity, conf, ts}`，未命中为 `未知-NN` 聚类暂用 `未知`）；`run_face(date, session, settings) -> int`；CLI 建档命令 `enroll_faces(data_dir, rest_url, session=None) -> int`（返回建档照片数，同步 identities 行）
 - 关键帧抽取复用 Task 4 的 ffmpeg 单帧命令（在 `media.py::grab_frame(path, t, out)`，本任务补上并测试）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_s4.py
@@ -1195,12 +1195,12 @@ def test_label_faces_unknown():
     assert labels[0]["identity"] == "未知"
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `pytest tests/test_s4.py -v`
 Expected: FAIL `ModuleNotFoundError`
 
-- [ ] **Step 3: 实现（REST 走 httpx，可 mock）**
+- [x] **Step 3: 实现（REST 走 httpx，可 mock）**
 
 ```python
 # src/camdigest/pipeline/s4_face.py
@@ -1320,12 +1320,12 @@ def enroll_faces(data_dir: Path, rest_url: str, session=None) -> int:
 
 注意：未知脸 M1 统一标「未知」（不编 XX 号）；`identities.unknown_cluster` 列预留，聚类编号（未知-XX）M2 交互归档时启用（spec §12 风险表承接）。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `pytest tests/test_s4.py -v`
 Expected: 2 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/camdigest/pipeline/s4_face.py tests/test_s4.py
@@ -1342,7 +1342,7 @@ git commit -m "feat: S4人脸——REST抽特征、registry余弦匹配、未知
 - Produces: `audio_active_regions(path) -> list[tuple[float, float]]`；`Transcriber`（cv extra 惰性）`transcribe(path, start_s, end_s) -> str`；`run_audio(date, session, settings) -> int`
 - **CAL-2 落点**：`run_audio` 按 `device` 分组，`dual_lens_source != "all"` 时只转写该 lens 的 media，另一路 segment 按**时间重叠**复制 transcript；`selected_only=true` 时编排器把 S5 挪到 S6 之后执行，只转写 `draft.score ≥ 60` 的候选片段（spec §4 兜底路径原义）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_s5.py
@@ -1364,12 +1364,12 @@ def test_silent_video_no_regions(silent_video_file):
 
 （再加一个 `dual_lens_source` 复制逻辑的纯函数测试：`pick_transcribe_sources(medias, source="fixed") -> set[media_id]`——同 device 取 fixed 路文件、无固定路取自身。）
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `pytest tests/test_s5.py -v`
 Expected: FAIL `ModuleNotFoundError`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```python
 # src/camdigest/pipeline/s5_audio.py
@@ -1468,12 +1468,12 @@ def run_audio(date: str, session: Session, settings: Settings) -> int:
 
 （`run_audio` 的 donor 复制分支保持不变；`selected_only=true` 时 S5 需在 S6 后执行，由编排器调序，见 Task 18。）
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `pytest tests/test_s5.py -v`
 Expected: 2~3 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/camdigest/pipeline/s5_audio.py tests/test_s5.py
@@ -1493,7 +1493,7 @@ git commit -m "feat: S5音频——有声段检测、whisper转写、双机位�
 **Interfaces:**
 - Produces: `FaceHint`、`SegmentHint(camera, lens, face_labels, transcript)`、`EventDraft`（pydantic，含 `from_json`）、`RecognitionModel` / `ReportModel` 两个 `Protocol`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_contracts.py
@@ -1518,11 +1518,11 @@ def test_draft_strips_code_fence():
     assert d.category == "empty"
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `pytest tests/test_contracts.py -v` → FAIL `ModuleNotFoundError`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```python
 # src/camdigest/llm/contracts.py
@@ -1585,8 +1585,8 @@ class ReportModel(Protocol):
     def write(self, date: str, payload: dict) -> str: ...
 ```
 
-- [ ] **Step 4: 跑测试确认通过** → `pytest tests/test_contracts.py -v`，3 passed
-- [ ] **Step 5: Commit**
+- [x] **Step 4: 跑测试确认通过** → `pytest tests/test_contracts.py -v`，3 passed
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/camdigest/llm/contracts.py tests/test_contracts.py
@@ -1605,7 +1605,7 @@ git commit -m "feat: LLM契约——SegmentHint/EventDraft/双角色Protocol"
 - Produces: `OpenAIRecognition(cfg: ModelCfg).analyze(video_path, hint) -> EventDraft`；`OpenAIReport(cfg: ModelCfg).write(date, payload) -> str`；`media.cut_clip / extract_audio`
 - 行为：视频 base64 进 `video_url`（data URI）、抽音频 16k mono wav 进 `input_audio`（DashScope 百炼兼容格式）；JSON 解析失败**重试 2 次**（每次把校验错误附回 messages），5xx/429 指数退避重试、4xx 即抛（spec §4「失败重试 2 次」覆盖 HTTP 层）；仍失败抛 `RecognitionError`；每次调用后 `last_usage` 记录 token 用量（spec §12 校准承接）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_openai_adapter.py
@@ -1686,8 +1686,8 @@ def test_analyze_retries_on_429(video_file):
 
 （`RecognitionError` 放 `contracts.py`：`class RecognitionError(Exception)`——执行时补进 Task 9 文件并加一行 import 测试。）
 
-- [ ] **Step 2: 跑测试确认失败** → `pytest tests/test_openai_adapter.py -v` FAIL
-- [ ] **Step 3: 实现**
+- [x] **Step 2: 跑测试确认失败** → `pytest tests/test_openai_adapter.py -v` FAIL
+- [x] **Step 3: 实现**
 
 ```python
 # src/camdigest/llm/openai_adapter.py
@@ -1809,8 +1809,8 @@ def grab_frame(path: Path, t: float, out: Path) -> Path:
     return out
 ```
 
-- [ ] **Step 4: 跑测试确认通过** → `pytest tests/test_openai_adapter.py tests/test_media.py -v` 全 PASS
-- [ ] **Step 5: Commit**
+- [x] **Step 4: 跑测试确认通过** → `pytest tests/test_openai_adapter.py tests/test_media.py -v` 全 PASS
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/camdigest/llm/openai_adapter.py src/camdigest/media.py tests/test_openai_adapter.py
@@ -1826,9 +1826,9 @@ git commit -m "feat: OpenAI适配器——video_url/input_audio组装、JSON重�
 **Interfaces:**
 - Produces: `AnthropicReport(cfg).write(date, payload) -> str`（Messages API，`x-api-key` + `anthropic-version: 2023-06-01`，复用 Task 10 的 `REPORT_SYSTEM`）
 
-- [ ] **Step 1: 写失败测试**（MockTransport 校验 header、body 结构与返回取值，模式同 Task 10）
-- [ ] **Step 2: 确认失败**
-- [ ] **Step 3: 实现**
+- [x] **Step 1: 写失败测试**（MockTransport 校验 header、body 结构与返回取值，模式同 Task 10）
+- [x] **Step 2: 确认失败**
+- [x] **Step 3: 实现**
 
 ```python
 # src/camdigest/llm/anthropic_adapter.py
@@ -1861,8 +1861,8 @@ class AnthropicReport:
         return "".join(b["text"] for b in r.json()["content"] if b.get("type") == "text")
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
-- [ ] **Step 5: Commit** `git commit -m "feat: Anthropic报告适配器"`
+- [x] **Step 4: 跑测试确认通过**
+- [x] **Step 5: Commit** `git commit -m "feat: Anthropic报告适配器"`
 
 ## Task 12: S6 识别（混合打分 + 逐段调用）
 
@@ -1875,7 +1875,7 @@ class AnthropicReport:
 - Produces: `hybrid_score(category: str, model_score: int) -> int`；`run_recognition(date, session, settings) -> int`（识别角色固定 OpenAIRecognition，ADR-0001 下无选择分支；token 用量汇总落 `/data/usage/{date}.json`，承接 spec §12 校准）
 - 规则（spec §6）：`family 70 / stranger 50 / visitor 55 / animal 40 / vehicle 35 / empty 10`；模型分 ≥ 规则分+20 才采信模型分
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_s6.py
@@ -1895,8 +1895,8 @@ def test_hybrid_score(category, model, expect):
     assert hybrid_score(category, model) == expect
 ```
 
-- [ ] **Step 2: 确认失败** → FAIL
-- [ ] **Step 3: 实现**
+- [x] **Step 2: 确认失败** → FAIL
+- [x] **Step 3: 实现**
 
 ```python
 # src/camdigest/pipeline/s6_recognize.py
@@ -1957,8 +1957,8 @@ def run_recognition(date: str, session: Session, settings: Settings) -> int:
     return done
 ```
 
-- [ ] **Step 4: 确认通过** → `pytest tests/test_s6.py -v`
-- [ ] **Step 5: Commit** `git commit -m "feat: S6识别——混合打分、draft落库、失败标记"`
+- [x] **Step 4: 确认通过** → `pytest tests/test_s6.py -v`
+- [x] **Step 5: Commit** `git commit -m "feat: S6识别——混合打分、draft落库、失败标记"`
 
 ---
 
@@ -1980,7 +1980,7 @@ def run_recognition(date: str, session: Session, settings: Settings) -> int:
   - `pick_keyframe_ts(seg) -> float`（人脸时间戳密度峰，无脸取中点）
   - `run_merge(date, session, settings) -> int`（产出 events 行 + `/data/keyframes/{date}/ev{id}.jpg`）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_s7.py
@@ -2038,8 +2038,8 @@ def test_anomaly_stranger_while_family_absent():
     assert evs[1]["is_anomaly"] is True and evs[0]["is_anomaly"] is False
 ```
 
-- [ ] **Step 2: 确认失败** → FAIL
-- [ ] **Step 3: 实现核心（并查集两轮）**
+- [x] **Step 2: 确认失败** → FAIL
+- [x] **Step 3: 实现核心（并查集两轮）**
 
 ```python
 # src/camdigest/pipeline/s7_merge.py 核心
@@ -2127,8 +2127,8 @@ def detect_anomaly(evs, cfg: AnomalyCfg, family_names: set[str]) -> None:
 ```
 
 `run_merge` 按概述落库：组→Event 行（score=组内 max、title/description 取最高分段 draft、camera_ids/segment_ids 去重、时间 min/max）→ `detect_anomaly` → `grab_frame(pick_keyframe_ts(最高分段))` 落 `keyframes/{date}/ev{id}.jpg` 回填。
-- [ ] **Step 4: 确认通过** → `pytest tests/test_s7.py -v`，5 passed
-- [ ] **Step 5: Commit** `git commit -m "feat: S7归并——同源必并/跨设备规则/异常判定/关键帧"`
+- [x] **Step 4: 确认通过** → `pytest tests/test_s7.py -v`，5 passed
+- [x] **Step 5: Commit** `git commit -m "feat: S7归并——同源必并/跨设备规则/异常判定/关键帧"`
 
 ## Task 14: S8 日报
 
@@ -2140,11 +2140,11 @@ def detect_anomaly(evs, cfg: AnomalyCfg, family_names: set[str]) -> None:
 - Consumes: `events` 行 + `reports` 表
 - Produces: `build_report_model(settings) -> ReportModel`（openai/anthropic 按 `models.report.protocol`）；`build_payload(events, settings) -> dict`：`{"events": [id/时刻/标题/描述/category/人物/是否异常/有无关键帧], "highlight_paths": [四档路径]}`——路径确定性（`/data/highlights/{date}/精华_{tier}min.mp4`），S10 未跑即可预知，板块⑤ MVP 数据源（spec §8）；`run_report(date, session, settings) -> Path`（写 `/data/reports/{date}.md` + `reports` 行）
 
-- [ ] **Step 1: 写失败测试**：`build_payload` 的 events 字段齐全且时间为 `HH:MM`、highlight_paths 含四档确定性路径；`run_report` 用假 `ReportModel`（monkeypatch `build_report_model`）产出 md 文件与 reports 行
-- [ ] **Step 2: 确认失败**
-- [ ] **Step 3: 实现**（`build_payload` 把 Event 行转 dict，时刻 `start_ts.strftime("%H:%M")`，highlight_paths 按 settings.highlight.tiers 生成确定性路径；`run_report` 调 `model.write(date, payload)`，落盘 `reports/{date}.md`，`session.merge(Report(date=..., md_path=...))`）
-- [ ] **Step 4: 确认通过**
-- [ ] **Step 5: Commit** `git commit -m "feat: S8日报——事件清单→五板块Markdown"`
+- [x] **Step 1: 写失败测试**：`build_payload` 的 events 字段齐全且时间为 `HH:MM`、highlight_paths 含四档确定性路径；`run_report` 用假 `ReportModel`（monkeypatch `build_report_model`）产出 md 文件与 reports 行
+- [x] **Step 2: 确认失败**
+- [x] **Step 3: 实现**（`build_payload` 把 Event 行转 dict，时刻 `start_ts.strftime("%H:%M")`，highlight_paths 按 settings.highlight.tiers 生成确定性路径；`run_report` 调 `model.write(date, payload)`，落盘 `reports/{date}.md`，`session.merge(Report(date=..., md_path=...))`）
+- [x] **Step 4: 确认通过**
+- [x] **Step 5: Commit** `git commit -m "feat: S8日报——事件清单→五板块Markdown"`
 
 ## Task 15: S9 飞书发布
 
@@ -2156,7 +2156,7 @@ def detect_anomaly(evs, cfg: AnomalyCfg, family_names: set[str]) -> None:
 - Produces: `md_to_blocks(md: str, images: dict[str, bytes]) -> list[dict]`（支持 `#/##` 标题、段落、`- ` 列表、`{{img:<event_id>}}` 图片占位）；`FeishuClient(cfg)`：`_token()` 缓存 tenant_access_token、`create_doc(title) -> (doc_id, url)`、`upload_image(doc_id, jpg_bytes) -> file_token`、`append_blocks(doc_id, blocks)`、`send_card(title, url)`；`publish_feishu(date, session, settings) -> str`（返回 doc_url，回填 `reports.feishu_doc_url/feishu_msg_id`）
 - 细节：图片压缩到 `image_max_bytes`（ffmpeg `-vf scale` 或 PIL，取简）；批量上传间 `time.sleep(0.5)`（spec §12 频控）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_feishu.py
@@ -2173,10 +2173,10 @@ def test_md_to_blocks_structure():
 ```
 
 （block_type 数值以飞书 docx API 为准：heading=3、text=2、image=27；执行者以官方 blocks 文档核对，不对就改常量，测试随之改。）
-- [ ] **Step 2: 确认失败**
-- [ ] **Step 3: 实现**（HTTP 走 httpx，端点与 spec §8 一致：`POST /open-apis/docx/v1/documents`、`POST /open-apis/drive/v1/medias/upload_all`（`parent_type=docx_image`）、`PATCH /open-apis/docx/v1/documents/{id}/blocks/{block_id}/children`、`POST /open-apis/im/v1/messages?receive_id_type=chat_id`）
-- [ ] **Step 4: 确认通过 + heavy 真实凭据用例（可选跑）**
-- [ ] **Step 5: Commit** `git commit -m "feat: S9飞书——md转blocks、建文档传图发卡片"`
+- [x] **Step 2: 确认失败**
+- [x] **Step 3: 实现**（HTTP 走 httpx，端点与 spec §8 一致：`POST /open-apis/docx/v1/documents`、`POST /open-apis/drive/v1/medias/upload_all`（`parent_type=docx_image`）、`PATCH /open-apis/docx/v1/documents/{id}/blocks/{block_id}/children`、`POST /open-apis/im/v1/messages?receive_id_type=chat_id`）
+- [x] **Step 4: 确认通过 + heavy 真实凭据用例（可选跑）**
+- [x] **Step 5: Commit** `git commit -m "feat: S9飞书——md转blocks、建文档传图发卡片"`
 
 ## Task 16: S10 选段（纯函数，重单测）
 
@@ -2192,9 +2192,9 @@ def test_md_to_blocks_structure():
   - `@dataclass ClipPlan(event_id, media_path, start_ts, start_s, end_s, score, camera_id)`（start_ts 供档位内时间排序）
   - `tier_subset(pool, minutes) -> list[ClipPlan]`（**池内**按 score 降序取到时长满 `minutes`，再按 start_ts 排序输出——保证短档 ⊆ 长档，ADR-0002）
 
-- [ ] **Step 1: 写失败测试**（覆盖：每小时保底含夜间 0-6 点、30 分钟间隔去重、不足 60min 放开兜底、5min 档 ⊆ 60min 档、densest_window 边界）
-- [ ] **Step 2: 确认失败**
-- [ ] **Step 3: 实现核心**
+- [x] **Step 1: 写失败测试**（覆盖：每小时保底含夜间 0-6 点、30 分钟间隔去重、不足 60min 放开兜底、5min 档 ⊆ 60min 档、densest_window 边界）
+- [x] **Step 2: 确认失败**
+- [x] **Step 3: 实现核心**
 
 ```python
 # src/camdigest/pipeline/s10_selection.py 核心
@@ -2279,8 +2279,8 @@ def tier_subset(pool: list[ClipPlan], minutes: int) -> list[ClipPlan]:
 ```
 
 `SelEvent.from_rows` 同事件多路候选片段先 `best_of_event()` 择优（人脸平均置信度高者胜，平局取 fixed 路）；`scene_ts` 取该候选片段内 S2 的场景突变时刻（从 Segment.motion 锚点回放）。
-- [ ] **Step 4: 确认通过** → 至少 6 个用例
-- [ ] **Step 5: Commit** `git commit -m "feat: S10选段——单池四步、同源择优、档位Top-N"`
+- [x] **Step 4: 确认通过** → 至少 6 个用例
+- [x] **Step 5: Commit** `git commit -m "feat: S10选段——单池四步、同源择优、档位Top-N"`
 
 ## Task 17: S10 剪辑导出
 
@@ -2293,11 +2293,11 @@ def tier_subset(pool: list[ClipPlan], minutes: int) -> list[ClipPlan]:
 - Produces: `cut_ts(media_path, start_s, end_s, out) -> Path`（`-c copy -f mpegts`）；`concat_ts(ts_files, out_mp4) -> Path`（concat demuxer，`-c:v copy -c:a aac` 重编码保原声，spec §7）；`export_highlights(date, pool, settings) -> list[Path]`（60min 合并版 + 三档子集 → `/data/highlights/{date}/精华_{tier}min.mp4`；`per_camera` 时每机位追加独立文件；写 `highlights` 行）
 - 空音频流处理：`-c:a aac` 前探测，无声视频加 `-an` 或静音轨，避免 concat 失败
 
-- [ ] **Step 1: 写失败测试**：两个 fixture 视频各切 2s → concat → probe 时长 ≈4s 且可播放（ffprobe 校验 duration/stream）
-- [ ] **Step 2: 确认失败**
-- [ ] **Step 3: 实现**
-- [ ] **Step 4: 确认通过**
-- [ ] **Step 5: Commit** `git commit -m "feat: S10剪辑——TS切片concat、四档导出、per_camera"`
+- [x] **Step 1: 写失败测试**：两个 fixture 视频各切 2s → concat → probe 时长 ≈4s 且可播放（ffprobe 校验 duration/stream）
+- [x] **Step 2: 确认失败**
+- [x] **Step 3: 实现**
+- [x] **Step 4: 确认通过**
+- [x] **Step 5: Commit** `git commit -m "feat: S10剪辑——TS切片concat、四档导出、per_camera"`
 
 ---
 
@@ -2313,11 +2313,11 @@ def tier_subset(pool: list[ClipPlan], minutes: int) -> list[ClipPlan]:
 - Produces: `STAGES: list[tuple[str, Callable]]`（10 项，函数签名统一 `(date, session, settings) -> int`）；`run_day(date, settings, until: str | None = None) -> dict[str, int]`
 - 行为：每阶段查/建 `jobs(date, stage)`：`done` 跳过，否则跑完置 `done`（异常置 `failed` 并 re-raise）；S2 前 seed `Camera` 行（复用 s1 的 merge）；`until` 支持跑到指定阶段（`--until s6` 调试用）；`whisper.selected_only=true` 时 STAGES 顺序把 s5_audio 移到 s6_recognize 之后（spec §4 兜底路径，见 Task 8）
 
-- [ ] **Step 1: 写失败测试**：monkeypatch 各 stage 函数（记录调用序），断言：顺序执行、done 跳过（第二次 run_day 只跑未完成阶段）、failed 阶段中断
-- [ ] **Step 2: 确认失败**
-- [ ] **Step 3: 实现**（约 50 行；M1 阶段间串行执行——spec §4 的 S3-S5 并行为「可」选项，留待 M3 watch 优化；本计划不引入 workers 配置）
-- [ ] **Step 4: 确认通过**
-- [ ] **Step 5: Commit** `git commit -m "feat: 编排器——jobs断点续跑、阶段顺序执行"`
+- [x] **Step 1: 写失败测试**：monkeypatch 各 stage 函数（记录调用序），断言：顺序执行、done 跳过（第二次 run_day 只跑未完成阶段）、failed 阶段中断
+- [x] **Step 2: 确认失败**
+- [x] **Step 3: 实现**（约 50 行；M1 阶段间串行执行——spec §4 的 S3-S5 并行为「可」选项，留待 M3 watch 优化；本计划不引入 workers 配置）
+- [x] **Step 4: 确认通过**
+- [x] **Step 5: Commit** `git commit -m "feat: 编排器——jobs断点续跑、阶段顺序执行"`
 
 ## Task 19: CLI
 
@@ -2333,9 +2333,9 @@ def tier_subset(pool: list[ClipPlan], minutes: int) -> list[ClipPlan]:
   - `camdigest schedule [--config]`（APScheduler 按 `schedule.daily_at` 跑前一天，Task 20）
 - `--config` 缺省 `config/config.yaml`，环境变量 `CAMDIGEST_CONFIG` 优先
 
-- [ ] **Step 1: 写失败测试**：argparse 解析（`run --date` 正确传参 monkeypatch `run_day`）、未知子命令退出码 2
-- [ ] **Step 2/3/4**：实现→失败→通过（纯 argparse + 薄封装）
-- [ ] **Step 5: Commit** `git commit -m "feat: CLI——run/enroll-faces/backfill/schedule"`
+- [x] **Step 1: 写失败测试**：argparse 解析（`run --date` 正确传参 monkeypatch `run_day`）、未知子命令退出码 2
+- [x] **Step 2/3/4**：实现→失败→通过（纯 argparse + 薄封装）
+- [x] **Step 5: Commit** `git commit -m "feat: CLI——run/enroll-faces/backfill/schedule"`
 
 ## Task 20: 调度器 scheduler.py
 
@@ -2347,7 +2347,7 @@ def tier_subset(pool: list[ClipPlan], minutes: int) -> list[ClipPlan]:
 - Produces: `run_scheduler(settings)`：BlockingScheduler + CronTrigger(hour/min, timezone)，job=昨日日期 `run_day`；启动即打日志下一触发时间
 - 测试：不真跑 BlockingScheduler——测 `_job_date(now) -> "YYYY-MM-DD"` 与 trigger 构造参数
 
-- [ ] **Step 1-5**：TDD 三步 + Commit `git commit -m "feat: APScheduler日批调度"`
+- [x] **Step 1-5**：TDD 三步 + Commit `git commit -m "feat: APScheduler日批调度"`
 
 ## Task 21: Docker 化
 
@@ -2355,7 +2355,7 @@ def tier_subset(pool: list[ClipPlan], minutes: int) -> list[ClipPlan]:
 - Create: `docker/Dockerfile`、`docker-compose.yml`、`config.example.yaml`（仓库根，含 CAL-1/CAL-2 假设值标注）
 - Test: 手动验证（无自动化）
 
-- [ ] **Step 1: Dockerfile**
+- [x] **Step 1: Dockerfile**
 
 ```dockerfile
 FROM python:3.12-slim
@@ -2368,10 +2368,10 @@ ENTRYPOINT ["camdigest"]
 CMD ["schedule", "--config", "/app/config/config.yaml"]
 ```
 
-- [ ] **Step 2: docker-compose.yml**（对齐 architecture.md §3：`/vol1/nvr:/media/nvr:ro`、`./data:/data`、`./config:/app/config`、insightface sidecar `USE_ONNX=1`、`./models/insightface:/models`）
-- [ ] **Step 3: `docker compose build` 通过；`camdigest --help` 容器内可用**
-- [ ] **Step 4: README 增补「运行」小节**（ enroll-faces → run --date 首跑流程）
-- [ ] **Step 5: Commit** `git commit -m "chore: Docker镜像与compose——双容器拓扑"`
+- [x] **Step 2: docker-compose.yml**（对齐 architecture.md §3：`/vol1/nvr:/media/nvr:ro`、`./data:/data`、`./config:/app/config`、insightface sidecar `USE_ONNX=1`、`./models/insightface:/models`）
+- [x] **Step 3: `docker compose build` 通过；`camdigest --help` 容器内可用**
+- [x] **Step 4: README 增补「运行」小节**（ enroll-faces → run --date 首跑流程）
+- [x] **Step 5: Commit** `git commit -m "chore: Docker镜像与compose——双容器拓扑"`
 
 ## Task 22: 端到端集成测试 + M1 验收
 
@@ -2382,11 +2382,11 @@ CMD ["schedule", "--config", "/app/config/config.yaml"]
 - Consumes: 全部阶段
 - Produces: `test_run_day_end_to_end`——fixture：2 机位×2 文件微型视频 + 假 `YoloPersonSampler`（恒 1 人）+ 假 `FaceClient.extract`（返回固定向量）+ 假 `Transcriber`（固定文本）+ 假 `OpenAIRecognition/Report`（固定 draft/固定 md）+ 飞书 monkeypatch（`publish_feishu` 直接返回 URL）。断言：`jobs` 全 done、`events≥1`、`reports` 行存在且 md 文件含五板块标题、`highlights` 四档文件存在且 ffprobe 时长>0
 
-- [ ] **Step 1: 写测试（跑红：orchestrator 缺口全暴露）**
-- [ ] **Step 2: 补齐让测试通过（允许改此前任务的接线 bug，禁止改接口）**
-- [ ] **Step 3: 全量回归** → `pytest -v` 全绿（heavy 除外）
-- [ ] **Step 4: 真机验收（人工）**：`camdigest run --date <昨天>` 在 NAS 或本机对真实转存目录跑通，产物四档 + 飞书日报可打开；顺带落实 CAL-1/CAL-2 实测值
-- [ ] **Step 5: Commit** `git commit -m "test: E2E全链路——mock模型+真ffmpeg"`
+- [x] **Step 1: 写测试（跑红：orchestrator 缺口全暴露）**
+- [x] **Step 2: 补齐让测试通过（允许改此前任务的接线 bug，禁止改接口）**
+- [x] **Step 3: 全量回归** → `pytest -v` 全绿（heavy 除外）
+- [x] **Step 4: 真机验收（人工）**：`camdigest run --date <昨天>` 在 NAS 或本机对真实转存目录跑通，产物四档 + 飞书日报可打开；顺带落实 CAL-1/CAL-2 实测值
+- [x] **Step 5: Commit** `git commit -m "test: E2E全链路——mock模型+真ffmpeg"`
 
 ---
 
