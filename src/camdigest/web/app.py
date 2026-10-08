@@ -25,7 +25,8 @@ def create_app(settings: Settings, *, with_scheduler: bool = False) -> FastAPI:
         app.mount(mount, StaticFiles(directory=data / sub), name=sub)
     from camdigest.web.views import router
     app.include_router(router)
-    if with_scheduler:                     # Task 6 接线：start_scheduler(app)
-        from camdigest.web.runner import start_scheduler
+    from camdigest.web.runner import RunManager, start_scheduler
+    app.state.runs = RunManager(settings)
+    if with_scheduler:
         start_scheduler(app)
     return app
