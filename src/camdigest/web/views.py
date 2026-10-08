@@ -13,11 +13,12 @@ router = APIRouter()
 
 # 日报板块⑤的绝对路径 → 点播链接（设计 §4：渲染时替换，md 文件不动）
 _HL_PATH_RE = re.compile(r"/data/highlights/([\d-]+)/([^\s。，；）]+?\.mp4)")
+_MD = mistune.create_markdown(escape=True)   # 原始 HTML 转义（终审应修 7）
 
 
 def render_report_html(md: str) -> str:
     md = _HL_PATH_RE.sub(r"[\1/\2](/highlights/\1/\2)", md)
-    return mistune.html(md)
+    return _MD(md)
 
 
 def _mount_url(settings, file_path: str, mount: str) -> str | None:
@@ -130,8 +131,11 @@ def faces_page(request: Request):
         identities = [{"name": i.name,
                        "archived": i.unknown_cluster}
                       for i in s.query(db.Identity).order_by(db.Identity.name)]
+        archived = {i["archived"] for i in identities if i["archived"]}
         clusters: dict[int, int] = {}
         for uf in s.query(db.UnknownFace).all():
+            if str(uf.cluster_id) in archived:
+                continue                        # 已归档簇不再出现在未知网格（终审应修 2）
             clusters[uf.cluster_id] = clusters.get(uf.cluster_id, 0) + 1
     known = [{"name": i["name"],
               "photo": f"/identity-photo/{i['name']}"}
@@ -160,8 +164,23 @@ def faces_archive(request: Request, cluster_id: int = Form(...),
                   name: str = Form(...)):
     if not name or "/" in name or ".." in name:
         raise HTTPException(422)           # 身份名白名单
+    if request.app.state.runs.busy:
+        return RedirectResponse("/faces?msg=busy", status_code=303)   # 避开 SQLite 写锁（终审应修 6）
     from camdigest import db
     from camdigest.web.faces import archive_cluster
     with db.session_scope(request.app.state.db_url) as s:
         archive_cluster(cluster_id, name, s, request.app.state.settings)
+    return RedirectResponse("/faces", status_code=303)
+
+
+@router.post("/faces/scan")
+def faces_scan(request: Request, date: str = Form(...)):
+    import datetime as _dt
+
+    try:
+        _dt.date.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(422)
+    from camdigest.web.faces import scan_day
+    scan_day(date, request.app.state.settings)   # 单日期扫描秒级完成，同步执行
     return RedirectResponse("/faces", status_code=303)

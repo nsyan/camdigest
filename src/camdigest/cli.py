@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
 
         from camdigest.web.app import create_app
         uvicorn.run(create_app(settings, with_scheduler=True),
-                    host="0.0.0.0", port=8080, log_config=None)
+                    host="0.0.0.0", port=8080)
         return 0
     parser.error(f"未知子命令 {args.command}")   # unreachable（required=True 已兜底）
     return 2

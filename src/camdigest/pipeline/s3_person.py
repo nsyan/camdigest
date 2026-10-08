@@ -68,8 +68,11 @@ def run_person(date: str, session: Session, settings: Settings) -> int:
         seg.person_count = r.max_count
         updated += 1
     # 云台路门控：ptz 机位 0 人候选片段删除（spec §4 云台防误报）
+    deleted = 0
     ptz_cams = {c.id for c in settings.cameras if c.lens == "ptz"}
     for seg, media in list(segments_for_date(date, session)):
         if media.camera_id in ptz_cams and seg.person_count == 0:
             session.delete(seg)
+            deleted += 1
+    log.info("S3 %s 计数 %d 段，云台门控删除 %d 段", date, updated, deleted)
     return updated

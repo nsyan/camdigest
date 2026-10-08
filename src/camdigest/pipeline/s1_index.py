@@ -30,4 +30,5 @@ def index_camera(camera: CameraCfg, session: Session) -> int:
                               end_ts=meta.start_ts + timedelta(seconds=meta.duration),
                               duration=meta.duration))
         added += 1
+    log.info("%s 新增 %d 个文件", camera.id, added)
     return added

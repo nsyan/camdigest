@@ -54,6 +54,7 @@ def scan_unknown_faces(date: str, session: Session, settings: Settings,
     for row in session.query(UnknownFace).all():
         clusters.setdefault(row.cluster_id, []).append(list(row.embedding))
     cluster_dir = Path(settings.storage.data_dir) / "keyframes" / ".clusters"
+    rep_scores: dict[int, float] = {}
     added = 0
     for seg, media in segments_for_date(date, session):
         if seg.person_count <= 0:
@@ -81,15 +82,17 @@ def scan_unknown_faces(date: str, session: Session, settings: Settings,
                         det_score=det.det_score))
                     added += 1
                     rep = cluster_dir / f"{cid}.jpg"
-                    if not rep.exists():       # 代表照先到先得；簇内高分替换仅限本次扫描
+                    if det.det_score > rep_scores.get(cid, -1.0):
+                        # 代表照 = 本次扫描 det_score 最高帧（设计 §5）；跨扫描不覆盖
                         rep.parent.mkdir(parents=True, exist_ok=True)
                         import shutil
                         shutil.copy(jpg, rep)
+                        rep_scores[cid] = det.det_score
     log.info("扫描 %s：新增 %d 张未知脸（%d 簇）", date, added, len(clusters))
     return added
 
 
-def _scan_day(date: str, settings: Settings) -> None:
+def scan_day(date: str, settings: Settings) -> None:
     """日批 post_run 钩子：session 包装 + 异常只记日志。"""
     from camdigest import db
     try:

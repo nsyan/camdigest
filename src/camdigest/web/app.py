@@ -28,7 +28,7 @@ def create_app(settings: Settings, *, with_scheduler: bool = False) -> FastAPI:
     from camdigest.web.runner import RunManager, start_scheduler
     app.state.runs = RunManager(settings)
     if with_scheduler:
-        from camdigest.web.faces import _scan_day
-        app.state.runs.post_run.append(lambda day: _scan_day(day, settings))
+        from camdigest.web.faces import scan_day
+        app.state.runs.post_run.append(lambda day: scan_day(day, settings))
         start_scheduler(app)
     return app

@@ -188,7 +188,8 @@ def run_merge(date: str, session: Session, settings: Settings) -> int:
             kf_dir.mkdir(parents=True, exist_ok=True)
             grab_frame(Path(top.media_path), pick_keyframe_ts(top), out)
             ev.keyframe_path = str(out) if out.exists() else None
-        except Exception:  # noqa: BLE001 —— 关键帧失败不阻断归并（M1 容错）
+        except Exception as e:  # noqa: BLE001 —— 关键帧失败不阻断归并（M1 容错）
+            log.warning("S7 关键帧失败 ev=%d：%s", ev.id, e)
             ev.keyframe_path = None
     anomalies = sum(1 for e in evs if e.is_anomaly)
     log.info("S7 %s：%d 片段 → %d 事件（异常 %d）", date, len(lites), created, anomalies)
