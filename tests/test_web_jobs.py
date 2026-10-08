@@ -44,11 +44,11 @@ def test_run_form_and_post(jobs_client):
 
 def test_run_busy_redirects_with_msg(jobs_client):
     c, app = jobs_client
-    app.state.runs._busy.set()
+    app.state.runs._lock.acquire()
     r = c.post("/run", data={"date": "2026-09-27"}, follow_redirects=False)
     assert r.status_code == 303
     assert r.headers["location"].startswith("/jobs?msg=busy")
-    app.state.runs._busy.clear()
+    app.state.runs._lock.release()
 
 
 def test_run_rejects_bad_input(jobs_client):

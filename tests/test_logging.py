@@ -114,3 +114,49 @@ def test_s7_s10_stage_logs(caplog, tmp_path, video_file):
     with db.session_scope(url) as s, caplog.at_level(logging.INFO, logger="camdigest"):
         export_highlights("2026-09-29", pool, settings, session=s)
     assert any("S10 导出 tier=5" in r.message for r in caplog.records)
+
+
+
+def test_s1_s3_log_lines(caplog, tmp_path, monkeypatch, video_file):
+    """Phase 0 计划契约：S1 新增文件行与 S3 门控行真实输出（终审应修 5）。"""
+    import shutil as _sh
+
+    from camdigest import db
+    from camdigest.config import CameraCfg, Settings
+    from camdigest.pipeline import s3_person
+    from camdigest.pipeline.s1_index import index_camera
+
+    setup_logging(tmp_path)
+    settings = Settings(
+        cameras=[CameraCfg(id="gate", name="大门", device="gate", lens="single",
+                           dir=tmp_path / "footage")],
+        models={"recognition": {"base_url": "http://x", "model": "m", "api_key": "k"},
+                "report": {"base_url": "http://x", "model": "m", "api_key": "k"}},
+        storage={"data_dir": str(tmp_path)})
+    cam_dir = tmp_path / "footage"
+    cam_dir.mkdir()
+    _sh.copy(video_file, cam_dir / "20260929100000.mp4")
+    url = f"sqlite:///{tmp_path}/t.db"
+    db.init_db(url)
+
+    with db.session_scope(url) as s, caplog.at_level(logging.INFO, logger="camdigest"):
+        assert index_camera(settings.cameras[0], s) == 1
+    assert any("gate 新增 1 个文件" in r.message for r in caplog.records)
+
+    class FakeSampler:
+        def __init__(self, weights="yolo11n.pt"):
+            pass
+
+        def sample(self, path, times):
+            return [(t, None) for t in times]
+
+        def infer(self, frames):
+            return [1] * len(frames)
+
+    monkeypatch.setattr(s3_person, "YoloPersonSampler", FakeSampler)
+    with db.session_scope(url) as s:
+        m = s.query(db.MediaFile).one()
+        s.add(db.Segment(media_file_id=m.id, start_s=0, end_s=6))
+    with db.session_scope(url) as s, caplog.at_level(logging.INFO, logger="camdigest"):
+        s3_person.run_person("2026-09-29", s, settings)
+    assert any("S3 2026-09-29" in r.message for r in caplog.records)

@@ -90,6 +90,57 @@ def test_scan_unknown_faces_clusters_and_reps(tmp_path, monkeypatch):
         assert s.query(db.UnknownFace).count() == 6
 
 
+def test_rep_photo_high_score_wins(tmp_path, monkeypatch):
+    """簇代表照 = 本次扫描 det_score 最高帧（设计 §5；终审应修 1）。"""
+    from datetime import UTC, datetime, timedelta
+
+    from camdigest import db
+    from camdigest.config import Settings
+    from camdigest.pipeline.s4_face import FaceDet
+    from camdigest.web.faces import scan_unknown_faces
+    from tests.conftest import make_video
+
+    settings = Settings(
+        cameras=[{"id": "gate", "name": "大门", "device": "gate",
+                  "lens": "single", "dir": "/x"}],
+        models={"recognition": {"base_url": "http://x", "model": "m", "api_key": "k"},
+                "report": {"base_url": "http://x", "model": "m", "api_key": "k"}},
+        storage={"data_dir": str(tmp_path / "data")})
+    media = tmp_path / "gate.mp4"
+    make_video(media, seconds=6)
+    url = f"sqlite:///{tmp_path}/t.db"
+    db.init_db(url)
+    t0 = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
+    with db.session_scope(url) as s:
+        m = db.MediaFile(camera_id="gate", path=str(media), start_ts=t0,
+                         end_ts=t0 + timedelta(seconds=6), duration=6.0)
+        s.add(m)
+        s.flush()
+        s.add(db.Segment(media_file_id=m.id, start_s=0, end_s=6, person_count=1))
+
+    calls = {"n": 0}
+
+    class FakeClient:
+        def __init__(self, base_url, timeout=30.0):
+            pass
+
+        def extract(self, image_bytes):
+            calls["n"] += 1
+            score = [0.5, 0.95, 0.7][calls["n"] - 1]   # 最高分在第 2 帧
+            return [FaceDet(bbox=[0, 0, 1, 1], det_score=score, norm=[1.0, 0.0])]
+
+    monkeypatch.setattr("camdigest.web.faces.FaceClient", FakeClient)
+    with db.session_scope(url) as s:
+        scan_unknown_faces("2026-09-29", s, settings)
+    # 采样时刻 = seg.start_s + span*k/4（k=1..3）→ t = 1.5/3.0/4.5；最高分 0.95 在第 2 帧(t=3.0)
+    from camdigest.media import grab_frame
+    expect = tmp_path / "expect.jpg"
+    grab_frame(media, 3.0, expect)
+    rep = settings.storage.data_dir / "keyframes" / ".clusters" / "1.jpg"
+    assert rep.exists()
+    assert rep.read_bytes() == expect.read_bytes()   # rep = 最高分帧内容
+
+
 def test_archive_cluster_backfills_and_reenrolls(tmp_path, monkeypatch):
     from datetime import UTC, datetime, timedelta
 
@@ -211,3 +262,82 @@ def test_faces_routes(tmp_path, monkeypatch):
     r = c.post("/faces/archive", data={"cluster_id": "1", "name": "a/b"},
                follow_redirects=False)
     assert r.status_code in (404, 422)   # 同上
+
+
+def test_faces_grid_filters_archived_clusters(tmp_path):
+    """归档后的簇不再出现在未知网格（终审应修 2）。"""
+    from camdigest import db
+    from camdigest.web.app import create_app
+    from tests.test_web_index import _settings as web_settings
+
+    settings = web_settings(tmp_path)
+    app = create_app(settings)
+    seed_url = f"sqlite:///{tmp_path}/t.db"
+    app.state.db_url = seed_url
+    db.init_db(seed_url)
+    with db.session_scope(seed_url) as s:
+        s.add(db.Identity(name="妈妈", dir="/f/妈妈", unknown_cluster="1"))
+        s.add(db.UnknownFace(cluster_id=1, embedding=[1.0, 0.0], segment_id=1,
+                             media_path="/x.mp4", ts_in_seg=1.0, det_score=0.9))
+        s.add(db.UnknownFace(cluster_id=2, embedding=[0.0, 1.0], segment_id=1,
+                             media_path="/x.mp4", ts_in_seg=2.0, det_score=0.8))
+    from starlette.testclient import TestClient
+    c = TestClient(app)
+    r = c.get("/faces")
+    assert "簇2" in r.text and "簇1" not in r.text
+
+
+def test_faces_archive_busy_redirects(tmp_path):
+    """补跑进行中归档 → 303 回 faces（终审应修 6，避免 SQLite 写锁 500）。"""
+    from camdigest import db
+    from camdigest.web.app import create_app
+    from tests.test_web_index import _settings as web_settings
+
+    settings = web_settings(tmp_path)
+    app = create_app(settings)
+    seed_url = f"sqlite:///{tmp_path}/t.db"
+    app.state.db_url = seed_url
+    db.init_db(seed_url)
+    with db.session_scope(seed_url) as s:
+        s.add(db.UnknownFace(cluster_id=1, embedding=[1.0], segment_id=1,
+                             media_path="/x.mp4", ts_in_seg=1.0, det_score=0.9))
+    from starlette.testclient import TestClient
+    c = TestClient(app)
+    app.state.runs._lock.acquire()              # 模拟补跑进行中
+    try:
+        r = c.post("/faces/archive", data={"cluster_id": "1", "name": "妈妈"},
+                   follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"].startswith("/faces?msg=busy")
+    finally:
+        app.state.runs._lock.release()
+
+
+def test_report_html_escapes_raw_html():
+    from camdigest.web.views import render_report_html
+
+    html = render_report_html("## 总览\n\n<script>alert(1)</script>")
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_manual_scan_route(tmp_path, monkeypatch):
+    """POST /faces/scan 单日期手动扫描（设计 §4 扫描按钮；终审应修 4）。"""
+    from camdigest import db
+    from camdigest.web.app import create_app
+    from tests.test_web_index import _settings as web_settings
+
+    settings = web_settings(tmp_path)
+    settings.faces.registry_dir = tmp_path / "faces"
+    (settings.faces.registry_dir).mkdir(parents=True)
+    app = create_app(settings)
+    seed_url = f"sqlite:///{tmp_path}/t.db"
+    app.state.db_url = seed_url
+    db.init_db(seed_url)
+    called = []
+    monkeypatch.setattr("camdigest.web.faces.scan_day", lambda d, s: called.append(d))
+    from starlette.testclient import TestClient
+    c = TestClient(app)
+    r = c.post("/faces/scan", data={"date": "2026-09-29"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert called == ["2026-09-29"]
