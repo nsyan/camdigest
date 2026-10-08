@@ -38,7 +38,7 @@ src/camdigest/web/
 ├── faces.py        # 未知脸聚类扫描 + 归档（唯一新算法）
 ├── runner.py       # 后台补跑线程 + 与调度的互斥锁
 ├── templates/      # base.html / index.html / day.html / jobs.html / run.html / faces.html
-└── static/         # style.css、faces.js（归档交互，几十行）
+└── static/         # style.css（归档用原生表单 POST，无需独立 JS——实现时归档）
 ```
 
 - **模块落位**：spec §10 预留的 `web/`。
@@ -81,7 +81,7 @@ src/camdigest/web/
 3. **历史回填**：按 `unknown_faces` 的（segment_id, ts_in_seg）精确映射，把相关 segments `face_labels` 中的「未知」替换为该身份名；
 4. 幂等：重复归档同簇先解绑（清理旧身份对该簇的引用）再执行。
 
-**边界**：回填只改数据库；**已生成的日报 md 不重写**（/day 页事件时间线显示回填后的名字；旧日报保持生成时原样）。
+**边界**：回填只改数据库（影响后续 S8 payload 与 /faces 页）；**已生成的日报 md 不重写**；**旧事件的 title/description 保持 S6 生成时原样**（时间线身份名不追溯——与"旧日报不可变"同一立场）；"重新生成历史日报"留待后续。
 
 ## 6. 部署
 
