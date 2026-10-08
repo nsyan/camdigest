@@ -85,3 +85,14 @@ def test_day_page_renders_report(day_client, tmp_path):
     r = c.get("/day/2026-09-29")
     assert "<h2>今日总览</h2>" in r.text
     assert 'href="/highlights/2026-09-29/精华_5min.mp4"' in unquote(r.text)
+
+
+def test_render_report_html_ascii_trailing_punct():
+    from urllib.parse import unquote
+
+    from camdigest.web.views import render_report_html
+
+    html = unquote(render_report_html(
+        "（见 /data/highlights/2026-09-29/精华_5min.mp4), 很好"))
+    assert 'href="/highlights/2026-09-29/精华_5min.mp4"' in html
+    assert ".mp4\"" in html                      # 链接文本不吞右括号

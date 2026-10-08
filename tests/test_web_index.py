@@ -47,3 +47,26 @@ def test_index_badge_counts(client):
     r = c.get("/")
     assert "回家" not in r.text          # 首页不展开事件明细
     assert "1" in r.text                 # 事件数徽章
+
+
+def test_index_includes_days_without_report(tmp_path):
+    """补跑到半程（有精华无日报）的日期也在首页可见（M2.1-1）。"""
+    from camdigest import db
+    from camdigest.web.app import create_app
+
+    settings = _settings(tmp_path)
+    app = create_app(settings)
+    seed_url = f"sqlite:///{tmp_path}/t.db"
+    app.state.db_url = seed_url
+    db.init_db(seed_url)
+    with db.session_scope(seed_url) as s:
+        s.add(db.Highlight(date="2026-09-28", camera_id=None, tier_minutes=5,
+                           file_path="/x.mp4", duration=1.0, bytes=1, event_ids=[1]))
+    c = TestClient(app)
+    r = c.get("/")
+    assert "2026-09-28" in r.text
+
+
+def test_index_report_badge(client):
+    c, _, _ = client
+    assert "报告" in c.get("/").text

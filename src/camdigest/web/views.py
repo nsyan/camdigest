@@ -12,7 +12,7 @@ from fastapi.responses import RedirectResponse
 router = APIRouter()
 
 # 日报板块⑤的绝对路径 → 点播链接（设计 §4：渲染时替换，md 文件不动）
-_HL_PATH_RE = re.compile(r"/data/highlights/([\d-]+)/([^\s。，；）]+?\.mp4)")
+_HL_PATH_RE = re.compile(r"/data/highlights/([\d-]+)/([^\s。，；）、)\]}>,]+?\.mp4)")
 _MD = mistune.create_markdown(escape=True)   # 原始 HTML 转义（终审应修 7）
 
 
@@ -35,13 +35,18 @@ def _mount_url(settings, file_path: str, mount: str) -> str | None:
 def index(request: Request):
     from camdigest import db
     with db.session_scope(request.app.state.db_url) as s:
-        dates = {r.date for r in s.query(db.Report).all()}
+        # 日期轴 = 报告 ∪ 精华 ∪ 事件（补跑半程的日子也可见；M2.1-1）
+        dates = ({r.date for r in s.query(db.Report).all()}
+                 | {h.date for h in s.query(db.Highlight).all()}
+                 | {e.date for e in s.query(db.Event).all()})
+        reports = {r.date for r in s.query(db.Report).all()}
         days = []
         for d in sorted(dates, reverse=True):
             hl = s.query(db.Highlight).filter(db.Highlight.date == d).count()
             evs = s.query(db.Event).filter(db.Event.date == d).all()
             days.append({"date": d, "tiers": hl, "events": len(evs),
-                         "anomalies": sum(1 for e in evs if e.is_anomaly)})
+                         "anomalies": sum(1 for e in evs if e.is_anomaly),
+                         "report": d in reports})
     return request.app.state.templates.TemplateResponse(
         request, "index.html", {"days": days})
 
@@ -153,7 +158,9 @@ def identity_photo(name: str, request: Request):
     if "/" in name or ".." in name or not name:
         raise HTTPException(422)           # 路径穿越白名单（设计 §7）
     path = Path(request.app.state.settings.faces.registry_dir) / name
-    photos = sorted(path.glob("*.jpg")) if path.is_dir() else []
+    if not path.is_dir():
+        raise HTTPException(404)
+    photos = sorted(path.glob("c*.jpg")) or sorted(path.glob("*.jpg"))
     if not photos:
         raise HTTPException(404)
     return FileResponse(photos[0])
@@ -162,7 +169,8 @@ def identity_photo(name: str, request: Request):
 @router.post("/faces/archive")
 def faces_archive(request: Request, cluster_id: int = Form(...),
                   name: str = Form(...)):
-    if not name or "/" in name or ".." in name:
+    name = name.strip()                    # M2.1-2：清洗空白
+    if not name or name in {".", ".."} or "/" in name:
         raise HTTPException(422)           # 身份名白名单
     if request.app.state.runs.busy:
         return RedirectResponse("/faces?msg=busy", status_code=303)   # 避开 SQLite 写锁（终审应修 6）

@@ -51,8 +51,10 @@ def scan_unknown_faces(date: str, session: Session, settings: Settings,
     client = client or FaceClient(settings.faces.rest_url)
     registry = load_registry(settings.faces.registry_dir, client)
     clusters: dict[int, list[list[float]]] = {}
+    seen: set[tuple[int, float]] = set()       # (segment_id, ts) 去重（M2.1-6）
     for row in session.query(UnknownFace).all():
         clusters.setdefault(row.cluster_id, []).append(list(row.embedding))
+        seen.add((row.segment_id, round(row.ts_in_seg, 3)))
     cluster_dir = Path(settings.storage.data_dir) / "keyframes" / ".clusters"
     rep_scores: dict[int, float] = {}
     added = 0
@@ -74,6 +76,9 @@ def scan_unknown_faces(date: str, session: Session, settings: Settings,
                 for det, label in zip(dets, labels):
                     if label["identity"] != "未知":
                         continue
+                    if (seg.id, round(t, 3)) in seen:
+                        continue
+                    seen.add((seg.id, round(t, 3)))
                     vec = [float(x) for x in det.norm]
                     cid = assign_cluster(vec, clusters)
                     session.add(UnknownFace(

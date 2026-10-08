@@ -2,6 +2,7 @@
 """FastAPI 应用工厂：三只读静态挂载 + 模板 + 路由（设计 §3）。"""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -14,7 +15,17 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
 def create_app(settings: Settings, *, with_scheduler: bool = False) -> FastAPI:
-    app = FastAPI(title="CamDigest", docs_url=None, redoc_url=None)
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        sched = getattr(app.state, "scheduler", None)
+        if sched is not None and sched.running:
+            sched.shutdown(wait=False)     # M2.1-4：应用关停时停调度器
+            from camdigest.web.runner import log as runner_log
+            runner_log.info("调度器已停止")
+
+    app = FastAPI(title="CamDigest", docs_url=None, redoc_url=None,
+                  lifespan=lifespan)
     app.state.settings = settings
     app.state.db_url = f"sqlite:///{Path(settings.storage.data_dir) / 'camdigest.db'}"
     app.state.templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))

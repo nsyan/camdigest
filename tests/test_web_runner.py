@@ -63,3 +63,17 @@ def test_post_run_hook_error_swallowed(tmp_path, monkeypatch):
     m.submit("2026-09-29")
     _wait_busy_clear(m)
     assert m.busy is False                       # 钩子异常不影响收尾
+
+
+def test_scheduler_shutdown_on_app_exit(tmp_path):
+    """应用关停时调度器随之停止（M2.1-4）。"""
+    from starlette.testclient import TestClient
+
+    from camdigest.web.app import create_app
+    from tests.test_web_index import _settings
+
+    app = create_app(_settings(tmp_path), with_scheduler=True)
+    with TestClient(app) as c:
+        assert app.state.scheduler.running is True
+        c.get("/")
+    assert app.state.scheduler.running is False

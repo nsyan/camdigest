@@ -81,13 +81,13 @@ def test_scan_unknown_faces_clusters_and_reps(tmp_path, monkeypatch):
     rep2 = settings.storage.data_dir / "keyframes" / ".clusters" / "2.jpg"
     assert rep1.exists() and rep2.exists()
 
-    # 二次扫描：向量与既有簇合并，不新开簇
+    # 二次扫描：向量与既有簇合并，不新开簇；同 (segment, ts) 去重不重复入库（M2.1-6）
     calls["n"] = 0
     with db.session_scope(url) as s:
-        scan_unknown_faces("2026-09-29", s, settings)
+        assert scan_unknown_faces("2026-09-29", s, settings) == 0
     with db.session_scope(url) as s:
         assert {f.cluster_id for f in s.query(db.UnknownFace).all()} == {1, 2}
-        assert s.query(db.UnknownFace).count() == 6
+        assert s.query(db.UnknownFace).count() == 3
 
 
 def test_rep_photo_high_score_wins(tmp_path, monkeypatch):
@@ -341,3 +341,63 @@ def test_manual_scan_route(tmp_path, monkeypatch):
     r = c.post("/faces/scan", data={"date": "2026-09-29"}, follow_redirects=False)
     assert r.status_code == 303
     assert called == ["2026-09-29"]
+
+
+def test_archive_name_normalized(tmp_path, monkeypatch):
+    """归档身份名 strip；纯点拒绝（M2.1-2）。"""
+    from camdigest import db
+    from camdigest.web.app import create_app
+    from tests.test_web_index import _settings as web_settings
+
+    settings = web_settings(tmp_path)
+    settings.faces.registry_dir = tmp_path / "faces"
+    (settings.faces.registry_dir).mkdir(parents=True)
+    app = create_app(settings)
+    seed_url = f"sqlite:///{tmp_path}/t.db"
+    app.state.db_url = seed_url
+    db.init_db(seed_url)
+    with db.session_scope(seed_url) as s:
+        s.add(db.UnknownFace(cluster_id=1, embedding=[1.0], segment_id=1,
+                             media_path="/x.mp4", ts_in_seg=1.0, det_score=0.9))
+
+    class FakeClient:
+        def __init__(self, base_url=None, timeout=30.0):
+            pass
+
+        def extract(self, image_bytes):
+            from camdigest.pipeline.s4_face import FaceDet
+            return [FaceDet(bbox=[0, 0, 1, 1], det_score=0.9, norm=[1.0, 0.0])]
+
+    monkeypatch.setattr("camdigest.pipeline.s4_face.FaceClient", FakeClient)
+    from starlette.testclient import TestClient
+    c = TestClient(app)
+    r = c.post("/faces/archive", data={"cluster_id": "1", "name": " 妈妈 "},
+               follow_redirects=False)
+    assert r.status_code == 303
+    with db.session_scope(seed_url) as s:
+        assert s.query(db.Identity).filter(db.Identity.name == "妈妈").count() == 1
+        assert s.query(db.Identity).filter(db.Identity.name == " 妈妈 ").count() == 0
+    assert c.post("/faces/archive", data={"cluster_id": "1", "name": "."}).status_code == 422
+
+
+def test_identity_photo_prefers_cluster_rep(tmp_path):
+    """身份照片优先 c*.jpg（归档代表照必是脸）（M2.1-5）。"""
+    from camdigest import db
+    from camdigest.web.app import create_app
+    from tests.test_web_index import _settings as web_settings
+
+    settings = web_settings(tmp_path)
+    settings.faces.registry_dir = tmp_path / "faces"
+    id_dir = settings.faces.registry_dir / "妈妈"
+    id_dir.mkdir(parents=True)
+    (id_dir / "a.jpg").write_bytes(b"first")
+    (id_dir / "c1.jpg").write_bytes(b"rep")
+    app = create_app(settings)
+    seed_url = f"sqlite:///{tmp_path}/t.db"
+    app.state.db_url = seed_url
+    db.init_db(seed_url)
+    with db.session_scope(seed_url) as s:
+        s.add(db.Identity(name="妈妈", dir=str(id_dir)))
+    from starlette.testclient import TestClient
+    c = TestClient(app)
+    assert c.get("/identity-photo/妈妈").content == b"rep"
