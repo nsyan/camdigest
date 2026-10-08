@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}人脸库 · CamDigest{% endblock %}
+{% block content %}
+<h1>人脸库</h1>
+<h2>已知身份</h2>
+{% if not known %}<p class="empty">还没有身份。用 camdigest enroll-faces 或在下方归档未知脸。</p>{% endif %}
+<div class="grid">
+{% for i in known %}
+  <div class="cell">
+    <img src="{{ i.photo }}" loading="lazy" alt="{{ i.name }}">
+    <span>{{ i.name }}{% if i.archived %} <span class="badge">簇{{ i.archived }}</span>{% endif %}</span>
+  </div>
+{% endfor %}
+</div>
+<h2>未知脸（{{ unknown | length }} 簇）</h2>
+{% for u in unknown %}
+<div class="cell cluster">
+  <img src="{{ u.photo }}" loading="lazy" alt="簇{{ u.cluster }}">
+  <span>簇{{ u.cluster }} · {{ u.count }} 张</span>
+  <form method="post" action="/faces/archive" class="archive">
+    <input type="hidden" name="cluster_id" value="{{ u.cluster }}">
+    <input type="text" name="name" placeholder="归入身份名" required>
+    <button type="submit">归档</button>
+  </form>
+</div>
+{% endfor %}
+{% endblock %}

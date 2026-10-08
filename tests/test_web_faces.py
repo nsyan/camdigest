@@ -2,6 +2,7 @@
 import pytest
 
 from camdigest.web.faces import assign_cluster, cosine
+from tests.test_web_index import _settings
 
 
 def test_cosine_unit():
@@ -151,3 +152,62 @@ def test_archive_cluster_backfills_and_reenrolls(tmp_path, monkeypatch):
         mama = s.query(db.Identity).filter(db.Identity.name == "妈妈").one()
         baba = s.query(db.Identity).filter(db.Identity.name == "爸爸").one()
         assert mama.unknown_cluster is None and baba.unknown_cluster == "1"
+
+
+def test_faces_routes(tmp_path, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from camdigest import db
+    from camdigest.web.app import create_app
+
+    settings = _settings(tmp_path)
+    settings.faces.registry_dir = tmp_path / "faces"
+    id_dir = settings.faces.registry_dir / "妈妈"
+    id_dir.mkdir(parents=True)
+    (id_dir / "a.jpg").write_bytes(b"\xff\xd8photo")
+    cluster_dir = settings.storage.data_dir / "keyframes" / ".clusters"
+    cluster_dir.mkdir(parents=True)
+    (cluster_dir / "1.jpg").write_bytes(b"\xff\xd8rep")
+    app = create_app(settings)
+    seed_url = f"sqlite:///{tmp_path}/t.db"
+    app.state.db_url = seed_url
+    db.init_db(seed_url)
+    t0 = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
+    with db.session_scope(seed_url) as s:
+        s.add(db.Identity(name="妈妈", dir=str(id_dir)))
+        m = db.MediaFile(camera_id="gate", path="/x.mp4", start_ts=t0,
+                         end_ts=t0 + timedelta(seconds=6), duration=6.0)
+        s.add(m)
+        s.flush()
+        s.add(db.Segment(media_file_id=m.id, start_s=0, end_s=6, person_count=1))
+        s.add(db.UnknownFace(cluster_id=1, embedding=[1.0, 0.0], segment_id=1,
+                             media_path="/x.mp4", ts_in_seg=1.0, det_score=0.9))
+    from starlette.testclient import TestClient
+    c = TestClient(app)
+
+    r = c.get("/faces")
+    assert r.status_code == 200
+    assert "妈妈" in r.text and "1.jpg" in r.text and "未知脸" in r.text
+
+    assert c.get("/identity-photo/妈妈").status_code == 200
+    assert c.get("/identity-photo/不存在").status_code == 404
+    assert c.get("/identity-photo/..%2Fetc").status_code == 422
+
+    class FakeClient:
+        def __init__(self, base_url, timeout=30.0):
+            pass
+
+        def extract(self, image_bytes):
+            from camdigest.pipeline.s4_face import FaceDet
+            return [FaceDet(bbox=[0, 0, 1, 1], det_score=0.9, norm=[1.0, 0.0])]
+
+    monkeypatch.setattr("camdigest.pipeline.s4_face.FaceClient", FakeClient)
+    r = c.post("/faces/archive", data={"cluster_id": "1", "name": "外婆"},
+               follow_redirects=False)
+    assert r.status_code == 303
+    with db.session_scope(seed_url) as s:
+        assert s.query(db.Identity).filter(
+            db.Identity.name == "外婆").one().unknown_cluster == "1"
+    r = c.post("/faces/archive", data={"cluster_id": "1", "name": "a/b"},
+               follow_redirects=False)
+    assert r.status_code == 422

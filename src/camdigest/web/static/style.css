@@ -30,3 +30,11 @@ form.card input, form.card select { padding: 8px; border: 1px solid var(--line);
 form.card button { padding: 10px; border: 0; border-radius: 8px; background: var(--brand); color: #fff; font-size: 15px; }
 .report { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 6px 16px; margin: 14px 0; }
 .report a { color: var(--brand); word-break: break-all; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+.cell { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 8px; text-align: center; }
+.cell img { width: 90px; height: 90px; object-fit: cover; border-radius: 8px; display: block; margin: 0 auto 6px; }
+.cell span { font-size: 13px; }
+.cell.cluster { margin-bottom: 12px; max-width: 220px; }
+form.archive { display: grid; gap: 6px; margin-top: 8px; }
+form.archive input[type=text] { padding: 6px; border: 1px solid var(--line); border-radius: 6px; }
+form.archive button { padding: 6px; border: 0; border-radius: 6px; background: var(--brand); color: #fff; }

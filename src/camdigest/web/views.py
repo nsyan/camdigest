@@ -119,3 +119,49 @@ def run_submit(request: Request, date: str = Form(...),
         raise HTTPException(422)           # 未知阶段名
     ok = request.app.state.runs.submit(date, until)
     return RedirectResponse("/jobs?msg=busy" if not ok else "/jobs", status_code=303)
+
+
+@router.get("/faces")
+def faces_page(request: Request):
+    from camdigest import db
+    settings = request.app.state.settings
+    registry_dir = Path(settings.faces.registry_dir)
+    with db.session_scope(request.app.state.db_url) as s:
+        identities = [{"name": i.name,
+                       "archived": i.unknown_cluster}
+                      for i in s.query(db.Identity).order_by(db.Identity.name)]
+        clusters: dict[int, int] = {}
+        for uf in s.query(db.UnknownFace).all():
+            clusters[uf.cluster_id] = clusters.get(uf.cluster_id, 0) + 1
+    known = [{"name": i["name"],
+              "photo": f"/identity-photo/{i['name']}"}
+             for i in identities if (registry_dir / i["name"]).is_dir()]
+    unknown = [{"cluster": cid, "count": n,
+                "photo": f"/keyframes/.clusters/{cid}.jpg"}
+               for cid, n in sorted(clusters.items())]
+    return request.app.state.templates.TemplateResponse(
+        request, "faces.html", {"known": known, "unknown": unknown})
+
+
+@router.get("/identity-photo/{name}")
+def identity_photo(name: str, request: Request):
+    from fastapi.responses import FileResponse
+    if "/" in name or ".." in name or not name:
+        raise HTTPException(422)           # 路径穿越白名单（设计 §7）
+    path = Path(request.app.state.settings.faces.registry_dir) / name
+    photos = sorted(path.glob("*.jpg")) if path.is_dir() else []
+    if not photos:
+        raise HTTPException(404)
+    return FileResponse(photos[0])
+
+
+@router.post("/faces/archive")
+def faces_archive(request: Request, cluster_id: int = Form(...),
+                  name: str = Form(...)):
+    if not name or "/" in name or ".." in name:
+        raise HTTPException(422)           # 身份名白名单
+    from camdigest import db
+    from camdigest.web.faces import archive_cluster
+    with db.session_scope(request.app.state.db_url) as s:
+        archive_cluster(cluster_id, name, s, request.app.state.settings)
+    return RedirectResponse("/faces", status_code=303)
