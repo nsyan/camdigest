@@ -56,3 +56,31 @@ def test_day_unknown_date_404(day_client):
     c, _ = day_client
     assert c.get("/day/1999-01-01").status_code == 404
     assert c.get("/day/not-a-date").status_code == 404
+
+
+def test_render_report_html_links_and_headings():
+    from camdigest.web.views import render_report_html
+
+    md = ("## 精华清单\n\n见 /data/highlights/2026-09-29/精华_5min.mp4。"
+          "\n\n本地 NAS 文件：/data/highlights/2026-09-29/精华_60min.mp4")
+    html = render_report_html(md)
+    assert "<h2>" in html
+    assert 'href="/highlights/2026-09-29/精华_5min.mp4"' in html
+    assert 'href="/highlights/2026-09-29/精华_60min.mp4"' in html
+    assert "/data/highlights/" not in html      # 绝对路径不再出现
+
+
+def test_day_page_renders_report(day_client, tmp_path):
+    from camdigest import db
+
+    c, settings = day_client
+    md = ("## 今日总览\n\n安好。\n\n## 精华清单\n\n"
+          "/data/highlights/2026-09-29/精华_5min.mp4")
+    rp = settings.storage.data_dir / "reports" / "2026-09-29.md"
+    rp.parent.mkdir(parents=True, exist_ok=True)
+    rp.write_text(md, encoding="utf-8")
+    with db.session_scope(f"sqlite:///{tmp_path}/t.db") as s:
+        s.merge(db.Report(date="2026-09-29", md_path=str(rp)))
+    r = c.get("/day/2026-09-29")
+    assert "<h2>今日总览</h2>" in r.text
+    assert 'href="/highlights/2026-09-29/精华_5min.mp4"' in r.text

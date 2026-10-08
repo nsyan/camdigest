@@ -6,6 +6,7 @@
 {% if h.url %}<video controls preload="metadata" src="{{ h.url }}"></video>
 <p class="caption">{{ h.tier }} 分钟档</p>{% endif %}
 {% endfor %}
+{% if report_html %}<section class="report">{{ report_html | safe }}</section>{% endif %}
 <h2>事件时间线</h2>
 {% for e in events %}
 <div class="event">

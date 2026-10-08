@@ -2,12 +2,22 @@
 """Web 路由：全部只读自 SQLite + /data（设计 §4）。"""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+import mistune
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 router = APIRouter()
+
+# 日报板块⑤的绝对路径 → 点播链接（设计 §4：渲染时替换，md 文件不动）
+_HL_PATH_RE = re.compile(r"/data/highlights/([\d-]+)/([^\s。，；）]+?\.mp4)")
+
+
+def render_report_html(md: str) -> str:
+    md = _HL_PATH_RE.sub(r"[\1/\2](/highlights/\1/\2)", md)
+    return mistune.html(md)
 
 
 def _mount_url(settings, file_path: str, mount: str) -> str | None:
@@ -51,6 +61,11 @@ def day(date: str, request: Request):
                   .order_by(db.Event.start_ts).all())
         if not highlights and not events:
             raise HTTPException(404)
+        report = s.query(db.Report).filter(db.Report.date == date).one_or_none()
+        report_html = None
+        if report and Path(report.md_path).exists():
+            report_html = render_report_html(
+                Path(report.md_path).read_text(encoding="utf-8"))
         tiers = sorted({h.tier_minutes for h in highlights})
         hls = [{"tier": h.tier_minutes,
                 "url": _mount_url(settings, h.file_path, "highlights")}
@@ -62,7 +77,7 @@ def day(date: str, request: Request):
                for e in events]
     return request.app.state.templates.TemplateResponse(
         request, "day.html", {"date": date, "tiers": tiers, "highlights": hls,
-                              "events": evs})
+                              "events": evs, "report_html": report_html})
 
 
 @router.get("/jobs")
