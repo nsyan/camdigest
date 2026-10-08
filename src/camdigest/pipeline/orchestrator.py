@@ -6,6 +6,8 @@ whisper.selected_only=true 时 S5 挪到 S6 之后（只转写已选中片段，
 """
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -13,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from camdigest.config import Settings
 from camdigest.db import Job
+
+log = logging.getLogger(__name__)
 
 
 def _run_s1(date: str, session: Session, settings: Settings) -> int:
@@ -102,6 +106,7 @@ def run_day(date: str, settings: Settings, *, until: str | None = None,
     """
     candidates = stages if stages is not None else STAGES
     order = _order(candidates, settings.prefilter.whisper.selected_only)
+    log.info("run_day %s 开始，%d 个阶段", date, len(order))
     if until:
         names = [n for n, _ in order]
         order = order[:names.index(until) + 1]
@@ -129,14 +134,19 @@ def run_day(date: str, settings: Settings, *, until: str | None = None,
                 job.status = "running"
                 job.error = None
             session.flush()
+            t0 = time.monotonic()
             try:
                 results[name] = fn(date, session, settings)
                 job.status = "done"
                 session.flush()
+                log.info("run_day %s %s done（%.1fs，%s）",
+                         date, name, time.monotonic() - t0, results[name])
             except Exception as e:
                 job.status = "failed"
                 job.error = str(e)[:500]
                 session.flush()
+                log.error("run_day %s %s failed（%.1fs）：%s",
+                          date, name, time.monotonic() - t0, e)
                 raise
     finally:
         if ctx is not None:

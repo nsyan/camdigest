@@ -65,6 +65,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     settings = _load_settings(_resolve_config(args))
+    from camdigest.logging_setup import setup_logging
+    setup_logging(settings.storage.data_dir)
 
     if args.command == "run":
         results = _run_day_for_cli(args.date, settings, until=args.until)
