@@ -13,3 +13,7 @@ h1 { font-size: 20px; }
 .badge.ok { color: var(--ok); background: #e6f4ea; }
 video { width: 100%; border-radius: 10px; background: #000; }
 .empty { color: var(--muted); }
+.caption { color: var(--muted); font-size: 13px; margin: 4px 0 14px; }
+.event { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+.event .time { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
+.event img { max-width: 100%; border-radius: 8px; margin-top: 8px; }

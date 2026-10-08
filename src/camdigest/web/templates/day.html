@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ date }} · CamDigest{% endblock %}
+{% block content %}
+<h1>{{ date }} 精华</h1>
+{% for h in highlights %}
+{% if h.url %}<video controls preload="metadata" src="{{ h.url }}"></video>
+<p class="caption">{{ h.tier }} 分钟档</p>{% endif %}
+{% endfor %}
+<h2>事件时间线</h2>
+{% for e in events %}
+<div class="event">
+  <span class="time">{{ e.time }}</span>
+  <strong>{{ e.title }}</strong>
+  {% if e.anomaly %}<span class="badge warn">异常</span>{% endif %}
+  <p>{{ e.description }}</p>
+  {% if e.keyframe %}<img src="{{ e.keyframe }}" loading="lazy" alt="{{ e.title }}">{% endif %}
+</div>
+{% endfor %}
+{% endblock %}
