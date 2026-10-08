@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}补跑 · CamDigest{% endblock %}
+{% block content %}
+<h1>手动补跑</h1>
+<form method="post" action="/run" class="card">
+  <label>日期 <input type="date" name="date" required></label>
+  <label>跑到阶段（可选）
+    <select name="until">
+      <option value="">全部</option>
+      {% for n in stages %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit">开始补跑</button>
+</form>
+{% endblock %}

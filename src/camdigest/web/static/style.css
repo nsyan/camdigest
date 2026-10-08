@@ -17,3 +17,14 @@ video { width: 100%; border-radius: 10px; background: #000; }
 .event { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
 .event .time { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
 .event img { max-width: 100%; border-radius: 8px; margin-top: 8px; }
+.jobs { border-collapse: collapse; background: #fff; width: 100%; font-size: 13px; }
+.jobs th, .jobs td { border: 1px solid var(--line); padding: 6px 8px; text-align: center; white-space: nowrap; }
+.jobs th { background: #f7f8fa; }
+.st-done { color: var(--ok); }
+.st-running { color: var(--brand); }
+.st-failed { color: var(--warn); font-weight: 600; }
+.flash { background: #fff8e1; border: 1px solid #f0c36d; border-radius: 8px; padding: 8px 12px; }
+form.card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; max-width: 420px; }
+form.card label { display: grid; gap: 4px; font-size: 14px; }
+form.card input, form.card select { padding: 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 15px; }
+form.card button { padding: 10px; border: 0; border-radius: 8px; background: var(--brand); color: #fff; font-size: 15px; }

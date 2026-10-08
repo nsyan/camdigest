@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi.responses import RedirectResponse
 
 router = APIRouter()
 
@@ -62,3 +63,44 @@ def day(date: str, request: Request):
     return request.app.state.templates.TemplateResponse(
         request, "day.html", {"date": date, "tiers": tiers, "highlights": hls,
                               "events": evs})
+
+
+@router.get("/jobs")
+def jobs_page(request: Request):
+    from camdigest import db
+    from camdigest.pipeline.orchestrator import STAGES
+    stage_names = [n for n, _ in STAGES]
+    with db.session_scope(request.app.state.db_url) as s:
+        jobs = s.query(db.Job).all()
+    by_date: dict[str, dict[str, str]] = {}
+    for j in jobs:
+        by_date.setdefault(j.date, {})[j.stage] = j.status
+    dates = sorted(by_date, reverse=True)
+    rows = [{"date": d,
+             "stages": [by_date.get(d, {}).get(n) for n in stage_names]}
+            for d in dates]
+    return request.app.state.templates.TemplateResponse(
+        request, "jobs.html", {"rows": rows, "stage_names": stage_names})
+
+
+@router.get("/run")
+def run_form(request: Request):
+    from camdigest.pipeline.orchestrator import STAGES
+    return request.app.state.templates.TemplateResponse(
+        request, "run.html", {"stages": [n for n, _ in STAGES]})
+
+
+@router.post("/run")
+def run_submit(request: Request, date: str = Form(...),
+               until: str | None = Form(None)):
+    import datetime as _dt
+
+    from camdigest.pipeline.orchestrator import STAGES
+    try:
+        _dt.date.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(422)           # 非法日期（设计 §4 参数白名单）
+    if until is not None and until not in {n for n, _ in STAGES}:
+        raise HTTPException(422)           # 未知阶段名
+    ok = request.app.state.runs.submit(date, until)
+    return RedirectResponse("/jobs?msg=busy" if not ok else "/jobs", status_code=303)

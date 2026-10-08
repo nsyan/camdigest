@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}进度 · CamDigest{% endblock %}
+{% block content %}
+<h1>批处理进度</h1>
+{% if request.query_params.msg == "busy" %}<p class="flash">已有任务在跑，本次未提交。</p>{% endif %}
+<div style="overflow-x:auto">
+<table class="jobs">
+<tr><th>日期</th>{% for n in stage_names %}<th>{{ n }}</th>{% endfor %}</tr>
+{% for row in rows %}
+<tr><td><a href="/day/{{ row.date }}">{{ row.date }}</a></td>
+  {% for st in row.stages %}
+  <td class="st-{{ st or 'none' }}">{{ st or "—" }}{% if st == "failed" %}⚠{% endif %}</td>
+  {% endfor %}
+</tr>
+{% endfor %}
+</table>
+</div>
+{% endblock %}
