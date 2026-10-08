@@ -72,9 +72,9 @@ def jobs_page(request: Request):
     stage_names = [n for n, _ in STAGES]
     with db.session_scope(request.app.state.db_url) as s:
         jobs = s.query(db.Job).all()
-    by_date: dict[str, dict[str, str]] = {}
+    by_date: dict[str, dict[str, tuple[str, str | None]]] = {}
     for j in jobs:
-        by_date.setdefault(j.date, {})[j.stage] = j.status
+        by_date.setdefault(j.date, {})[j.stage] = (j.status, j.error)
     dates = sorted(by_date, reverse=True)
     rows = [{"date": d,
              "stages": [by_date.get(d, {}).get(n) for n in stage_names]}

@@ -9,7 +9,9 @@
 {% for row in rows %}
 <tr><td><a href="/day/{{ row.date }}">{{ row.date }}</a></td>
   {% for st in row.stages %}
-  <td class="st-{{ st or 'none' }}">{{ st or "—" }}{% if st == "failed" %}⚠{% endif %}</td>
+  {% set status = st[0] if st else none %}{% set err = st[1] if st else none %}
+  <td class="st-{{ status or 'none' }}" {% if err %}title="{{ err }}"{% endif %}>
+    {{ status or "—" }}{% if status == "failed" %} {{ err or "⚠" }}{% endif %}</td>
   {% endfor %}
 </tr>
 {% endfor %}
