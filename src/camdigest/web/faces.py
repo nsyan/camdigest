@@ -7,9 +7,11 @@ import tempfile
 from pathlib import Path
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from camdigest.config import Settings
-from camdigest.pipeline.s4_face import FaceClient
+from camdigest.db import Identity, Segment, UnknownFace
+from camdigest.pipeline.s4_face import FaceClient, enroll_faces
 
 log = logging.getLogger(__name__)
 
@@ -95,3 +97,35 @@ def _scan_day(date: str, settings: Settings) -> None:
             scan_unknown_faces(date, s, settings)
     except Exception:
         log.exception("日批后扫描未知脸失败（%s）", date)
+
+
+def archive_cluster(cluster_id: int, name: str, session: Session,
+                    settings: Settings, client=None) -> Path:
+    """簇 → 身份：代表照入档 → registry 重建 → 历史回填（设计 §5）。"""
+    import shutil
+
+    faces_dir = Path(settings.faces.registry_dir)
+    target = faces_dir / name
+    target.mkdir(parents=True, exist_ok=True)
+    rep = Path(settings.storage.data_dir) / "keyframes" / ".clusters" / f"{cluster_id}.jpg"
+    if rep.exists():
+        shutil.copy(rep, target / f"c{cluster_id}.jpg")
+    # 幂等：解绑其他身份对该簇的引用
+    for row in session.query(Identity).filter(Identity.unknown_cluster == str(cluster_id)):
+        row.unknown_cluster = None
+    enroll_faces(faces_dir, settings.faces.rest_url, session=session, client=client)
+    ident = session.query(Identity).filter(Identity.name == name).one()
+    ident.unknown_cluster = str(cluster_id)
+    # 历史回填：按 (segment_id, ts) 精确映射替换「未知」
+    renamed = 0
+    for uf in session.query(UnknownFace).filter(UnknownFace.cluster_id == cluster_id):
+        seg = session.get(Segment, uf.segment_id)
+        if not seg or not seg.face_labels:
+            continue
+        for f in seg.face_labels:
+            if f.get("identity") == "未知" and abs(f.get("ts", -1.0) - uf.ts_in_seg) < 0.05:
+                f["identity"] = name
+                renamed += 1
+        flag_modified(seg, "face_labels")
+    log.info("归档簇 %d → %s（回填 %d 处）", cluster_id, name, renamed)
+    return target

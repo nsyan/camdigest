@@ -87,3 +87,67 @@ def test_scan_unknown_faces_clusters_and_reps(tmp_path, monkeypatch):
     with db.session_scope(url) as s:
         assert {f.cluster_id for f in s.query(db.UnknownFace).all()} == {1, 2}
         assert s.query(db.UnknownFace).count() == 6
+
+
+def test_archive_cluster_backfills_and_reenrolls(tmp_path, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from camdigest import db
+    from camdigest.config import Settings
+    from camdigest.web.faces import archive_cluster
+
+    settings = Settings(
+        cameras=[{"id": "gate", "name": "大门", "device": "gate",
+                  "lens": "single", "dir": "/x"}],
+        models={"recognition": {"base_url": "http://x", "model": "m", "api_key": "k"},
+                "report": {"base_url": "http://x", "model": "m", "api_key": "k"}},
+        storage={"data_dir": str(tmp_path / "data")})
+    settings.faces.registry_dir = tmp_path / "faces"
+    (settings.faces.registry_dir).mkdir(parents=True)
+    cluster_dir = settings.storage.data_dir / "keyframes" / ".clusters"
+    cluster_dir.mkdir(parents=True)
+    rep = cluster_dir / "1.jpg"
+    rep.write_bytes(b"\xff\xd8fake-rep")
+
+    url = f"sqlite:///{tmp_path}/t.db"
+    db.init_db(url)
+    t0 = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
+    with db.session_scope(url) as s:
+        m = db.MediaFile(camera_id="gate", path="/x.mp4", start_ts=t0,
+                         end_ts=t0 + timedelta(seconds=120), duration=120.0)
+        s.add(m)
+        s.flush()
+        s.add(db.Segment(media_file_id=m.id, start_s=0, end_s=60, person_count=1,
+                         face_labels=[{"identity": "未知", "conf": 0.9, "ts": 30.0}]))
+        s.flush()
+        s.add(db.UnknownFace(cluster_id=1, embedding=[1.0, 0.0], segment_id=1,
+                             media_path="/x.mp4", ts_in_seg=30.0, det_score=0.9))
+        s.add(db.UnknownFace(cluster_id=1, embedding=[0.99, 0.01], segment_id=1,
+                             media_path="/x.mp4", ts_in_seg=40.0, det_score=0.8))
+
+    class FakeClient:
+        def __init__(self, base_url, timeout=30.0):
+            pass
+
+        def extract(self, image_bytes):
+            return [__import__("camdigest.pipeline.s4_face", fromlist=["FaceDet"]).FaceDet(
+                bbox=[0, 0, 1, 1], det_score=0.9, norm=[1.0, 0.0])]
+
+    monkeypatch.setattr("camdigest.pipeline.s4_face.FaceClient", FakeClient)
+    with db.session_scope(url) as s:
+        target = archive_cluster(1, "妈妈", s, settings)
+    assert (target / "c1.jpg").exists()
+    assert (settings.faces.registry_dir / "registry.npz").exists()
+    with db.session_scope(url) as s:
+        ident = s.query(db.Identity).filter(db.Identity.name == "妈妈").one()
+        assert ident.unknown_cluster == "1"
+        seg = s.query(db.Segment).one()
+        assert seg.face_labels[0]["identity"] == "妈妈"      # 历史回填
+
+    # 重新归档同簇为另一身份：旧身份解绑（幂等语义）
+    with db.session_scope(url) as s:
+        archive_cluster(1, "爸爸", s, settings)
+    with db.session_scope(url) as s:
+        mama = s.query(db.Identity).filter(db.Identity.name == "妈妈").one()
+        baba = s.query(db.Identity).filter(db.Identity.name == "爸爸").one()
+        assert mama.unknown_cluster is None and baba.unknown_cluster == "1"
