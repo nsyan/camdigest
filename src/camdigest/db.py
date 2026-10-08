@@ -9,6 +9,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -109,6 +110,20 @@ class Job(Base):
     error: Mapped[str | None] = mapped_column(String)
     started_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class UnknownFace(Base):
+    """M2 未知脸聚类（docs/m2-web-design.md §3）：embedding 按簇分组落库。"""
+    __tablename__ = "unknown_faces"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cluster_id: Mapped[int] = mapped_column(Integer, index=True)
+    embedding: Mapped[list] = mapped_column(JSON)
+    segment_id: Mapped[int] = mapped_column(Integer)
+    media_path: Mapped[str] = mapped_column(String)
+    ts_in_seg: Mapped[float] = mapped_column(Float)
+    det_score: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(
+        default=lambda: datetime.now(UTC))
 
 
 class Identity(Base):
