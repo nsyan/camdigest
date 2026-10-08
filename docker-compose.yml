@@ -1,10 +1,7 @@
 # 对齐 docs/architecture.md §3：主应用 + insightface sidecar 双容器
 services:
   camdigest:
-    image: camdigest:latest
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    image: ghcr.io/nsyan/camdigest:latest   # CI 自动构建（推 main 触发）；本地构建：docker build -f docker/Dockerfile -t camdigest:latest .
     volumes:
       - /vol1/nvr:/media/nvr:ro        # 5 机位录像根目录（只读）——按真机转存路径改左侧
       - ./data:/data                    # 产物 + SQLite + 人脸库
