@@ -35,3 +35,7 @@ docker compose up -d --build
 产物在 `/data`：`highlights/{日期}/精华_5|10|30|60min.mp4` + `reports/{日期}.md` + 飞书在线文档（家庭群卡片推送）。断点续跑：中断后重跑同一日期自动跳过已完成阶段。
 
 > 校准点：CAL-1（双摄目录形态）、CAL-2（双机位音轨）首跑后按真机实测改 `config.yaml`，无需改代码（见 config.example.yaml 内注释）。
+
+## Web UI（M2）
+
+`camdigest web`（容器默认入口）在 **8080** 端口提供局域网页面：每日精华点播 + 日报浏览、批处理进度、任选日期补跑、人脸库归档。家人手机连家里 Wi-Fi 打开 `http://NAS_IP:8080` 即用。日志：`docker logs camdigest` + `data/logs/camdigest.log`。设计见 [docs/m2-web-design.md](./docs/m2-web-design.md)。

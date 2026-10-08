@@ -110,3 +110,23 @@ def test_enroll_faces_dispatches(monkeypatch, tmp_path):
     rc = cli.main(["enroll-faces"])
     assert rc == 0 and "faces" in seen["dir"]
     assert seen["session"] is not None   # spec §5：identities 行同步需要 session
+
+
+def test_web_subcommand_starts_uvicorn(monkeypatch, tmp_path):
+    import uvicorn
+
+    seen = {}
+
+    def fake_run(app, host=None, port=None, **kw):
+        seen["app"] = app
+        seen["host"] = host
+        seen["port"] = port
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    s = _settings()
+    s.storage.data_dir = tmp_path
+    monkeypatch.setattr(cli, "_load_settings", lambda path: s)
+    rc = cli.main(["web"])
+    assert rc == 0
+    assert seen["host"] == "0.0.0.0" and seen["port"] == 8080
+    assert seen["app"].state.settings is s

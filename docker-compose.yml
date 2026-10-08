@@ -7,6 +7,8 @@ services:
       - ./data:/data                    # 产物 + SQLite + 人脸库
       - ./config:/app/config
       - ./cache:/root/.cache            # faster-whisper/HF 模型缓存（避免重建容器重新下载）
+    ports:
+      - "8080:8080"                     # Web UI（LAN 点播/进度/补跑/人脸库）
     depends_on: [insightface]
     restart: unless-stopped
 

@@ -6,4 +6,4 @@ WORKDIR /app
 COPY . .
 RUN pip install --no-cache-dir ".[cv]"
 ENTRYPOINT ["camdigest"]
-CMD ["schedule", "--config", "/app/config/config.yaml"]
+CMD ["web", "--config", "/app/config/config.yaml"]   # Web UI + 日批调度（8080）

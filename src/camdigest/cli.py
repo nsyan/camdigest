@@ -54,6 +54,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sched = sub.add_parser("schedule", help="按 schedule.daily_at 每日批处理（跑前一天）")
     _add(sched)
+
+    web = sub.add_parser("web", help="启动 Web UI（LAN 点播/进度/补跑/人脸库，含日批调度）")
+    _add(web)
     return p
 
 
@@ -102,6 +105,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "schedule":
         from camdigest.scheduler import run_scheduler
         run_scheduler(settings)
+        return 0
+    if args.command == "web":
+        import uvicorn
+
+        from camdigest.web.app import create_app
+        uvicorn.run(create_app(settings, with_scheduler=True),
+                    host="0.0.0.0", port=8080, log_config=None)
         return 0
     parser.error(f"未知子命令 {args.command}")   # unreachable（required=True 已兜底）
     return 2
