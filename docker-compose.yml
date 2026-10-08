@@ -2,11 +2,14 @@
 services:
   camdigest:
     image: camdigest:latest
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     volumes:
-      - /vol1/nvr:/media/nvr:ro        # 5 机位录像根目录（只读）
+      - /vol1/nvr:/media/nvr:ro        # 5 机位录像根目录（只读）——按真机转存路径改左侧
       - ./data:/data                    # 产物 + SQLite + 人脸库
       - ./config:/app/config
+      - ./cache:/root/.cache            # faster-whisper/HF 模型缓存（避免重建容器重新下载）
     depends_on: [insightface]
     restart: unless-stopped
 
