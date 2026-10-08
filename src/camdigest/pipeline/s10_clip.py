@@ -6,11 +6,14 @@
 """
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 
 from camdigest.config import Settings
 from camdigest.pipeline.s10_selection import ClipPlan, tier_subset
+
+log = logging.getLogger(__name__)
 
 
 def cut_ts(media_path: str | Path, start_s: float, end_s: float, out: Path) -> Path:
@@ -59,6 +62,8 @@ def export_highlights(date: str, pool: list[ClipPlan], settings: Settings,
 
     per_camera=true：合并版完成后每机位再各导一份（取该机位子集，camera_id 落行）。
     """
+    import time
+
     from camdigest.db import Highlight
     from camdigest.media import probe
 
@@ -68,8 +73,11 @@ def export_highlights(date: str, pool: list[ClipPlan], settings: Settings,
         subset = tier_subset(pool, tier)
         if not subset:
             continue
+        t0 = time.monotonic()
         out = _export_one(date, subset, tier, settings, base / f"精华_{tier}min.mp4")
         outs.append(out)
+        log.info("S10 导出 tier=%d → %s（%.1fs，%.1fs 素材）",
+                 tier, out, time.monotonic() - t0, probe(out).duration)
         if session is not None:
             session.add(Highlight(date=date, camera_id=None, tier_minutes=tier,
                                   file_path=str(out), duration=probe(out).duration,

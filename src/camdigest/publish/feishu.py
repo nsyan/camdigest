@@ -8,6 +8,7 @@ POST /open-apis/im/v1/messages?receive_id_type=chat_id。
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 import tempfile
@@ -17,6 +18,8 @@ from pathlib import Path
 import httpx
 
 from camdigest.config import FeishuCfg, Settings
+
+log = logging.getLogger(__name__)
 
 _IMG_RE = re.compile(r"\{\{img:(\w+)\}\}")
 
@@ -175,6 +178,7 @@ def publish_feishu(date: str, session, settings: Settings,
     blocks = md_to_blocks(md, images, token_of)
     fc.append_blocks(doc_id, blocks)
     msg_id = fc.send_card(f"{date} 家庭日报", doc_url)
+    log.info("S9 文档 %s（卡片 %s，%d 块）", doc_url, msg_id, len(blocks))
 
     report.feishu_doc_url = doc_url
     report.feishu_msg_id = msg_id

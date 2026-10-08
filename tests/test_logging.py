@@ -70,3 +70,47 @@ def test_llm_retry_logged(caplog, video_file, tmp_path):
     with caplog.at_level(logging.WARNING, logger="camdigest"):
         r.analyze(__import__("pathlib").Path(video_file), SegmentHint(camera="x", lens="single"))
     assert any("LLM 重试" in rec.message for rec in caplog.records)
+
+
+def test_s7_s10_stage_logs(caplog, tmp_path, video_file):
+    import shutil
+    from datetime import UTC, datetime, timedelta
+
+    from camdigest import db
+    from camdigest.config import Settings
+    from camdigest.pipeline.s7_merge import run_merge
+    from camdigest.pipeline.s10_clip import export_highlights
+    from camdigest.pipeline.s10_selection import ClipPlan
+
+    setup_logging(tmp_path / "data")
+    settings = Settings(
+        cameras=[{"id": "gate", "name": "大门", "device": "gate",
+                  "lens": "single", "dir": "/x"}],
+        models={"recognition": {"base_url": "http://x", "model": "m", "api_key": "k"},
+                "report": {"base_url": "http://x", "model": "m", "api_key": "k"}},
+        highlight={"tiers": [5]},
+        storage={"data_dir": str(tmp_path / "data")})
+    url = f"sqlite:///{tmp_path}/t.db"
+    db.init_db(url)
+    t0 = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
+    with db.session_scope(url) as s:
+        s.add(db.Camera(id="gate", name="大门", device="gate", lens="single",
+                        dir="/x", pattern="*.mp4", timezone="Asia/Shanghai"))
+        m = db.MediaFile(camera_id="gate", path="/x.mp4", start_ts=t0,
+                         end_ts=t0 + timedelta(seconds=120), duration=120.0)
+        s.add(m)
+        s.flush()
+        s.add(db.Segment(media_file_id=m.id, start_s=0, end_s=60, person_count=1,
+                         draft={"category": "family", "score": 85, "title": "回家",
+                                "description": "d", "people": ["妈妈"]},
+                         recognition_status="ok"))
+    with db.session_scope(url) as s, caplog.at_level(logging.INFO, logger="camdigest"):
+        run_merge("2026-09-29", s, settings)
+    assert any("S7 2026-09-29：" in r.message for r in caplog.records)
+
+    shutil.copy(video_file, tmp_path / "gate.mp4")
+    pool = [ClipPlan(event_id=1, media_path=str(tmp_path / "gate.mp4"),
+                     start_ts=t0, start_s=0.0, end_s=2.0, score=85, camera_id="gate")]
+    with db.session_scope(url) as s, caplog.at_level(logging.INFO, logger="camdigest"):
+        export_highlights("2026-09-29", pool, settings, session=s)
+    assert any("S10 导出 tier=5" in r.message for r in caplog.records)

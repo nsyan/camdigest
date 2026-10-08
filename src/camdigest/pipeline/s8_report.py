@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -13,6 +14,8 @@ from camdigest.config import Settings
 from camdigest.db import Event, Report, Segment
 from camdigest.llm.anthropic_adapter import AnthropicReport
 from camdigest.llm.openai_adapter import OpenAIReport
+
+log = logging.getLogger(__name__)
 
 
 def build_report_model(settings: Settings):
@@ -74,4 +77,5 @@ def run_report(date: str, session: Session, settings: Settings) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(md, encoding="utf-8")
     session.merge(Report(date=date, md_path=str(out)))
+    log.info("S8 日报落盘 %s", out)
     return out

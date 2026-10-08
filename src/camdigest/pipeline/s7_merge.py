@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -14,6 +15,8 @@ from sqlalchemy.orm import Session
 from camdigest.config import AnomalyCfg, Settings
 from camdigest.db import Event, Identity
 from camdigest.pipeline.query import cams_by_id, segments_for_date
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -187,4 +190,6 @@ def run_merge(date: str, session: Session, settings: Settings) -> int:
             ev.keyframe_path = str(out) if out.exists() else None
         except Exception:  # noqa: BLE001 —— 关键帧失败不阻断归并（M1 容错）
             ev.keyframe_path = None
+    anomalies = sum(1 for e in evs if e.is_anomaly)
+    log.info("S7 %s：%d 片段 → %d 事件（异常 %d）", date, len(lites), created, anomalies)
     return created
