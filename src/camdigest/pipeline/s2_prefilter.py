@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 from dataclasses import dataclass
@@ -17,6 +18,8 @@ from sqlalchemy.orm import Session
 from camdigest.config import PrefilterCfg, Settings
 from camdigest.db import MediaFile, Segment
 from camdigest.pipeline.query import cams_by_id, medias_for_date
+
+log = logging.getLogger(__name__)
 
 _PTS_RE = re.compile(r"pts_time:([\d.]+)")
 
@@ -72,4 +75,5 @@ def run_prefilter(date: str, session: Session, settings: Settings) -> int:
             session.add(Segment(media_file_id=media.id, start_s=d.start_s, end_s=d.end_s,
                                 motion_score=d.motion_score))
             added += 1
+    log.info("%s 预筛 %d 段", date, added)
     return added

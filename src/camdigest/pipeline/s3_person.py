@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from sqlalchemy.orm import Session
 
 from camdigest.config import Settings
 from camdigest.pipeline.query import segments_for_date
+
+log = logging.getLogger(__name__)
 
 
 def sample_times(start_s: float, end_s: float, fps: float = 1.0) -> list[float]:

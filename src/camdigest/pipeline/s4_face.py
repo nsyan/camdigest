@@ -88,6 +88,8 @@ def run_face(date: str, session: Session, settings: Settings) -> int:
     from camdigest.media import grab_frame
     client = FaceClient(settings.faces.rest_url)
     registry = load_registry(settings.faces.registry_dir, client)
+    log.info("S4 registry：%d 身份 %d 向量",
+             len(registry), sum(len(v) for v in registry.values()))
     updated = 0
     for seg, media in segments_for_date(date, session):
         if seg.person_count <= 0 or seg.face_labels:

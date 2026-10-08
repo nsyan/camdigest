@@ -2,6 +2,7 @@
 """S1 索引：扫描机位目录 → ffprobe 元数据入库（spec §4）。幂等：按 path 去重。"""
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from sqlalchemy.orm import Session
@@ -9,6 +10,8 @@ from sqlalchemy.orm import Session
 from camdigest.config import CameraCfg
 from camdigest.db import Camera, MediaFile
 from camdigest.media import probe
+
+log = logging.getLogger(__name__)
 
 
 def index_camera(camera: CameraCfg, session: Session) -> int:

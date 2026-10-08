@@ -48,3 +48,25 @@ def test_run_day_stage_logs(caplog, tmp_path):
     msgs = [r.message for r in caplog.records]
     assert any("run_day 2026-09-29 开始" in m for m in msgs)
     assert any("s1_index done" in m for m in msgs)
+
+
+def test_llm_retry_logged(caplog, video_file, tmp_path):
+    import httpx
+
+    from camdigest.config import ModelCfg
+    from camdigest.llm.contracts import SegmentHint
+    from camdigest.llm.openai_adapter import OpenAIRecognition
+
+    n = {"n": 0}
+
+    def handler(request):
+        n["n"] += 1
+        content = "junk" if n["n"] < 3 else (
+            '{"category":"empty","people":[],"score":10,"title":"t","description":"d"}')
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    r = OpenAIRecognition(ModelCfg(base_url="http://fake/v1", model="m", api_key="k"))
+    r._http = httpx.Client(transport=httpx.MockTransport(handler))
+    with caplog.at_level(logging.WARNING, logger="camdigest"):
+        r.analyze(__import__("pathlib").Path(video_file), SegmentHint(camera="x", lens="single"))
+    assert any("LLM 重试" in rec.message for rec in caplog.records)

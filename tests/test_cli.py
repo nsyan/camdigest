@@ -41,7 +41,7 @@ def test_run_without_config_uses_env_or_default(monkeypatch):
 
     def fake_load(path):
         seen["path"] = str(path)
-        return object()
+        return _settings()
 
     def fake_run_day(date, settings, until=None):
         seen["ran"] = True

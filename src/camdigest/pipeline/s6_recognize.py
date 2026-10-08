@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from camdigest.llm.contracts import FaceHint, SegmentHint
 from camdigest.llm.openai_adapter import OpenAIRecognition
 from camdigest.media import cut_clip
 from camdigest.pipeline.query import cams_by_id, segments_for_date
+
+log = logging.getLogger(__name__)
 
 # family 70 / empty 10 来自 spec §6；stranger/visitor/animal/vehicle 为计划补全值（见计划「声明偏离」）
 RULE_SCORE = {"family": 70, "stranger": 50, "visitor": 55,
@@ -47,6 +50,7 @@ def run_recognition(date: str, session: Session, settings: Settings) -> int:
                          "title": draft.title, "description": draft.description}
             seg.recognition_status = "ok"
         except Exception as e:  # noqa: BLE001 —— 重试已耗尽 → 标记失败，人工补跑（ADR-0001）
+            log.warning("S6 seg=%s 识别失败：%s", seg.id, e)
             seg.recognition_status = "failed"
             seg.draft = {"error": str(e)[:500]}
         finally:
@@ -56,4 +60,5 @@ def run_recognition(date: str, session: Session, settings: Settings) -> int:
     usage.parent.mkdir(parents=True, exist_ok=True)
     usage.write_text(json.dumps({"segments": done, "usage": totals},
                                 ensure_ascii=False), encoding="utf-8")
+    log.info("S6 %s 完成 %d 段，token 汇总 %s", date, done, totals)
     return done

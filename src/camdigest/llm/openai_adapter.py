@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import time
 from pathlib import Path
 
@@ -11,6 +12,8 @@ import httpx
 from camdigest.config import ModelCfg
 from camdigest.llm.contracts import EventDraft, RecognitionError, SegmentHint
 from camdigest.media import extract_audio
+
+log = logging.getLogger(__name__)
 
 SYSTEM = (
     "你是家庭监控视频分析器。画面人物身份标签由人脸识别给出，直接采信，不要重新判断身份。"
@@ -55,9 +58,12 @@ class OpenAIRecognition:
                 last_err = f"HTTP {e.response.status_code}"
                 if e.response.status_code < 500 and e.response.status_code != 429:
                     raise  # 4xx（鉴权/参数错）重试无意义
+                log.warning("LLM 重试（第 %d 次）：HTTP %d",
+                            attempt + 1, e.response.status_code)
                 time.sleep(2 ** attempt)
             except Exception as e:  # noqa: BLE001  解析/校验失败 → 带反馈重试
                 last_err = str(e)
+                log.warning("LLM 重试（第 %d 次）：%s", attempt + 1, last_err)
                 messages += [{"role": "assistant", "content": text},
                              {"role": "user", "content": f"输出不是合法 EventDraft JSON：{last_err}，请只输出修正后的 JSON"}]
         raise RecognitionError(last_err)
