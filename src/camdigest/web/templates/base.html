@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}CamDigest{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav><a href="/" class="brand">CamDigest</a>
+<span class="nav-links"><a href="/jobs">进度</a> <a href="/run">补跑</a> <a href="/faces">人脸库</a></span>
+</nav>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>

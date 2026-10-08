@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}精华视频 · CamDigest{% endblock %}
+{% block content %}
+<h1>每日精华</h1>
+{% if not days %}<p class="empty">还没有产物。先在「补跑」页跑一天试试。</p>{% endif %}
+{% for d in days %}
+<a class="day-card" href="/day/{{ d.date }}">
+  <span class="date">{{ d.date }}</span>
+  <span class="badges">
+    {% if d.events %}<span class="badge">{{ d.events }} 事件</span>{% endif %}
+    {% if d.anomalies %}<span class="badge warn">{{ d.anomalies }} 异常</span>{% endif %}
+    {% if d.tiers %}<span class="badge ok">{{ d.tiers }} 档精华</span>{% endif %}
+  </span>
+</a>
+{% endfor %}
+{% endblock %}
