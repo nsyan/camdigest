@@ -1,5 +1,6 @@
 # tests/test_web_day.py —— /day 点播页：播放器、关键帧、404
 from datetime import UTC, datetime
+from urllib.parse import unquote
 
 import pytest
 
@@ -63,7 +64,7 @@ def test_render_report_html_links_and_headings():
 
     md = ("## 精华清单\n\n见 /data/highlights/2026-09-29/精华_5min.mp4。"
           "\n\n本地 NAS 文件：/data/highlights/2026-09-29/精华_60min.mp4")
-    html = render_report_html(md)
+    html = unquote(render_report_html(md))       # mistune 会百分号编码非 ASCII href（账本 Task 8 裁决）
     assert "<h2>" in html
     assert 'href="/highlights/2026-09-29/精华_5min.mp4"' in html
     assert 'href="/highlights/2026-09-29/精华_60min.mp4"' in html
@@ -83,4 +84,4 @@ def test_day_page_renders_report(day_client, tmp_path):
         s.merge(db.Report(date="2026-09-29", md_path=str(rp)))
     r = c.get("/day/2026-09-29")
     assert "<h2>今日总览</h2>" in r.text
-    assert 'href="/highlights/2026-09-29/精华_5min.mp4"' in r.text
+    assert 'href="/highlights/2026-09-29/精华_5min.mp4"' in unquote(r.text)
