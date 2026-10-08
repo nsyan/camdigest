@@ -129,8 +129,13 @@ def enroll_faces(data_dir: Path, rest_url: str, session=None,
                 vecs.append(np.asarray(dets[0].norm, dtype=np.float32))
         if vecs:
             registry[id_dir.name] = vecs
-        if session is not None:  # 同步登记 identities 表（spec §5）
-            session.merge(Identity(name=id_dir.name, dir=str(id_dir)))
+        if session is not None:  # 同步登记 identities 表（spec §5）；重建档更新而非重复插入
+            row = session.query(Identity).filter(
+                Identity.name == id_dir.name).one_or_none()
+            if row:
+                row.dir = str(id_dir)
+            else:
+                session.add(Identity(name=id_dir.name, dir=str(id_dir)))
     if not registry:
         return 0
     np.savez(data_dir / "registry.npz",
